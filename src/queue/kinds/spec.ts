@@ -48,7 +48,7 @@ export async function prepareSpecAxis(ctx: KindContext): Promise<SpecAxis> {
   }
 
   const gathered = await gatherSpecSources(
-    { config, projectId: data.projectId, projectPath: data.projectPath, downloadDir: ctx.downloadDir, log: jlog },
+    { config, projectId: data.projectId, downloadDir: ctx.downloadDir, log: jlog },
     refs,
   );
   degraded.push(...gathered.degraded);

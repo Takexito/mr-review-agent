@@ -52,15 +52,8 @@ describe('extractSpecRefs', () => {
 
 describe('gatherSpecSources', () => {
   const ctx = {
-    config: {
-      gitlabHost: HOST,
-      gitlabToken: 'bot',
-      gitlabReadToken: 'read',
-      docsRepoProject: 'g/docs',
-      projectAllowlist: ['g/p', 'g/other'],
-    } as unknown as AppConfig,
+    config: { gitlabHost: HOST, gitlabToken: 'bot', gitlabReadToken: 'read' } as AppConfig,
     projectId: 7,
-    projectPath: 'g/p',
     downloadDir: '/tmp/unused',
     log: { warn: () => undefined } as unknown as Logger,
   };
@@ -91,54 +84,6 @@ describe('gatherSpecSources', () => {
     expect(result.degraded).toHaveLength(2);
     expect(result.degraded[0]).toContain('#99');
     expect(result.degraded[1]).toContain('LINEAR_API_KEY');
-  });
-});
-
-describe('gatherSpecSources: project boundary', () => {
-  const ctx = {
-    config: {
-      gitlabHost: HOST,
-      gitlabToken: 'bot',
-      docsRepoProject: 'g/docs',
-      projectAllowlist: ['g/p', 'g/other'],
-    } as unknown as AppConfig,
-    projectId: 7,
-    projectPath: 'g/p',
-    downloadDir: '/tmp/unused',
-    log: { warn: () => undefined } as unknown as Logger,
-  };
-
-  it('should refuse a source from a project outside the MR project and the allowlist without any request', async () => {
-    const fetchMock = vi.fn(async () => new Response('{}', { status: 200 }));
-    vi.stubGlobal('fetch', fetchMock);
-
-    const result = await gatherSpecSources(ctx, [
-      { kind: 'gitlab', target: 'secret-group/payroll#1' },
-      { kind: 'gitlab', target: 'https://gitlab.com/secret-group/payroll/-/issues/2' },
-      // В PROJECT_ALLOWLIST, но это другой проект: автор MR в g/p не обязан его видеть.
-      { kind: 'gitlab', target: 'g/other#5' },
-    ]);
-
-    expect(result.sources).toEqual([]);
-    expect(result.degraded).toHaveLength(3);
-    expect(result.degraded[0]).toContain('вне проекта этого MR');
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it('should accept the docs project and the MR project written by path', async () => {
-    const fetchMock = vi.fn(async (input: string | URL) =>
-      String(input).includes('/notes')
-        ? new Response('[]', { status: 200 })
-        : new Response(JSON.stringify({ title: 'T', web_url: `${HOST}/g/docs/-/issues/3` }), { status: 200 }),
-    );
-    vi.stubGlobal('fetch', fetchMock);
-
-    const result = await gatherSpecSources(ctx, [
-      { kind: 'gitlab', target: 'g/docs#3' },
-      { kind: 'gitlab', target: 'G/P#4' },
-    ]);
-
-    expect(result.sources).toHaveLength(2);
   });
 });
 

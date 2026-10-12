@@ -6,9 +6,15 @@ describe('neutralizeQuickActions', () => {
     expect(neutralizeQuickActions('Готово.\n/merge\n  /approve')).toBe('Готово.\n\\/merge\n  \\/approve');
   });
 
-  it('should leave slashes that cannot be commands', () => {
-    const text = 'путь features/src/A.kt и /tmp/x\n> /approve в цитате\n| /close | в таблице |\n/ 2 = половина';
-    expect(neutralizeQuickActions(text)).toBe(text.replace('и /tmp/x', 'и /tmp/x'));
+  it('should leave slashes that do not start a line', () => {
+    const text = 'путь features/src/A.kt и /tmp/x\n> /approve в цитате\n| /close | в таблице |';
+    expect(neutralizeQuickActions(text)).toBe(text);
+  });
+
+  it('should escape any leading slash without guessing what GitLab treats as a command name', () => {
+    expect(neutralizeQuickActions('/Merge\n/assign_reviewer @x\n/2fa\n\t/close')).toBe(
+      '\\/Merge\n\\/assign_reviewer @x\n\\/2fa\n\t\\/close',
+    );
   });
 
   it('should escape commands inside fenced code blocks too', () => {
