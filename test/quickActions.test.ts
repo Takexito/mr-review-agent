@@ -11,12 +11,11 @@ describe('neutralizeQuickActions', () => {
     expect(neutralizeQuickActions(text)).toBe(text.replace('и /tmp/x', 'и /tmp/x'));
   });
 
-  it('should not touch lines inside fenced code blocks', () => {
-    const text = '```bash\n/usr/bin/env node\n/merge\n```\n/merge';
-    expect(neutralizeQuickActions(text)).toBe('```bash\n/usr/bin/env node\n/merge\n```\n\\/merge');
+  it('should escape commands inside fenced code blocks too', () => {
+    expect(neutralizeQuickActions('```bash\n/merge\n```')).toBe('```bash\n\\/merge\n```');
   });
 
-  it('should keep escaping after a tilde fence that contains backticks', () => {
-    expect(neutralizeQuickActions('~~~\n```\n/close\n~~~\n/close')).toBe('~~~\n```\n/close\n~~~\n\\/close');
+  it('should escape a command after a fence that is never closed', () => {
+    expect(neutralizeQuickActions('```\nкод\n/approve')).toBe('```\nкод\n\\/approve');
   });
 });
