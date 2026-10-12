@@ -1,0 +1,152 @@
+import { execa } from 'execa';
+import { mkdtemp, mkdir, rm, access } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import type { AppConfig } from '../config.js';
+import { KeyedMutex } from '../util/keyedMutex.js';
+
+/**
+ * Один bare-кэш на репозиторий, и джоб может быть несколько одновременно
+ * (`QUEUE_CONCURRENCY`). Все операции над кэшем сериализуем по его пути.
+ */
+const cacheLock = new KeyedMutex();
+
+/** Имя каталога bare-кэша по пути проекта. Экспортируется: по нему кэш находят и другие модули. */
+export function slugify(projectPath: string): string {
+  return `${projectPath.replace(/[^a-zA-Z0-9_.-]/g, '__')}.git`;
+}
+
+/** Путь bare-кэша проекта — без гарантии, что он уже выкачан. */
+export function cachePath(config: AppConfig, projectPath: string): string {
+  return join(config.reposCacheDir, slugify(projectPath));
+}
+
+function hostname(gitlabHost: string): string {
+  return new URL(gitlabHost).host;
+}
+
+/**
+ * URL с токеном — используется только как аргумент команды, в remote НЕ сохраняется.
+ * Берём `gitlabCloneToken`: ему хватает `read_repository`, тогда как постинг требует `api`.
+ */
+function tokenizedUrl(config: AppConfig, projectPath: string): string {
+  const host = hostname(config.gitlabHost);
+  return `https://oauth2:${config.gitlabCloneToken}@${host}/${projectPath}.git`;
+}
+
+function tokenlessUrl(config: AppConfig, projectPath: string): string {
+  const host = hostname(config.gitlabHost);
+  return `https://${host}/${projectPath}.git`;
+}
+
+async function exists(path: string): Promise<boolean> {
+  try {
+    await access(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Есть ли коммит в кэше. Без этого агент в agentic-режиме упрётся в `bad object`. */
+export async function hasCommit(cacheDir: string, sha: string): Promise<boolean> {
+  try {
+    await execa('git', ['-C', cacheDir, 'cat-file', '-e', `${sha}^{commit}`]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export interface EnsureCacheOptions {
+  /**
+   * IID мерж-реквеста. Если задан, дополнительно тянем `refs/merge-requests/<iid>/head`:
+   * ветки целевого проекта не покрывают MR из форка (там нет headSha) и force-push
+   * в target (там пропадает baseSha).
+   */
+  readonly mrIid?: number;
+  /** Ревизии, без которых джоба бессмысленна — добираем точечно, если их нет после fetch. */
+  readonly requireShas?: readonly string[];
+}
+
+/** Ревизия не доехала в кэш — джобу продолжать нельзя, но и падать молча не стоит. */
+export class MissingRevisionError extends Error {
+  constructor(readonly sha: string) {
+    super(`revision ${sha} is not reachable in the repository cache`);
+    this.name = 'MissingRevisionError';
+  }
+}
+
+/**
+ * Гарантирует свежий bare-кэш репозитория и возвращает путь к нему.
+ * Токен передаётся только как аргумент git (fetch/clone), в конфиг remote
+ * пишется URL без токена — чтобы креды не оседали на диске.
+ */
+export async function ensureBareCache(
+  config: AppConfig,
+  projectPath: string,
+  options: EnsureCacheOptions = {},
+): Promise<string> {
+  const dir = cachePath(config, projectPath);
+  const withToken = tokenizedUrl(config, projectPath);
+  const withoutToken = tokenlessUrl(config, projectPath);
+
+  return cacheLock.run(dir, async () => {
+    await mkdir(config.reposCacheDir, { recursive: true });
+
+    const refspecs = ['+refs/heads/*:refs/heads/*'];
+    if (options.mrIid !== undefined) {
+      refspecs.push(`+refs/merge-requests/${options.mrIid}/head:refs/mr/${options.mrIid}/head`);
+    }
+
+    if (await exists(join(dir, 'HEAD'))) {
+      await execa('git', ['-C', dir, 'fetch', '--prune', '--quiet', withToken, ...refspecs]);
+    } else {
+      await rm(dir, { recursive: true, force: true });
+      await execa('git', ['clone', '--bare', '--quiet', withToken, dir]);
+      await execa('git', ['-C', dir, 'remote', 'set-url', 'origin', withoutToken]);
+      if (refspecs.length > 1) {
+        await execa('git', ['-C', dir, 'fetch', '--quiet', withToken, ...refspecs.slice(1)]);
+      }
+    }
+
+    for (const sha of options.requireShas ?? []) {
+      if (await hasCommit(dir, sha)) continue;
+      // Последняя попытка: точечный fetch по SHA (GitLab разрешает при allowReachableSHA1InWant).
+      await execa('git', ['-C', dir, 'fetch', '--quiet', withToken, sha]).catch(() => undefined);
+      if (!(await hasCommit(dir, sha))) throw new MissingRevisionError(sha);
+    }
+
+    return dir;
+  });
+}
+
+/**
+ * Каталог джобы. Внутри лежит `repo/` (cwd агента) и рядом — `docs-repo/`, `linear/`.
+ * Соседние каталоги, а не подкаталоги репозитория: иначе они засоряют worktree и
+ * вылезают в `git status`/`git diff` как untracked.
+ */
+export async function createJobDir(): Promise<string> {
+  return mkdtemp(join(tmpdir(), 'codex-wt-'));
+}
+
+/** Создаёт detached-worktree на нужном SHA по заданному пути. */
+export async function addWorktreeAt(cacheDir: string, sha: string, target: string): Promise<string> {
+  await cacheLock.run(cacheDir, () =>
+    execa('git', ['-C', cacheDir, 'worktree', 'add', '--detach', '--quiet', target, sha]),
+  );
+  return target;
+}
+
+/** Убирает worktree. Ошибки глушим — это cleanup. */
+export async function removeWorktree(cacheDir: string, worktreePath: string): Promise<void> {
+  await cacheLock
+    .run(cacheDir, () => execa('git', ['-C', cacheDir, 'worktree', 'remove', '--force', worktreePath]))
+    .catch(() => undefined);
+  await rm(worktreePath, { recursive: true, force: true }).catch(() => undefined);
+}
+
+/** Сносит каталог джобы целиком (worktree'ы должны быть сняты до этого). */
+export async function removeJobDir(jobDir: string): Promise<void> {
+  await rm(jobDir, { recursive: true, force: true }).catch(() => undefined);
+}

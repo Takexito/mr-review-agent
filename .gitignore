@@ -1,0 +1,11 @@
+node_modules/
+dist/
+*.log
+.env
+.env.local
+# провижен только через volume/секреты, никогда в git:
+auth.json
+data/
+.DS_Store
+# результаты сухих прогонов: содержат текст задач и код проверяемого проекта
+dry-run/

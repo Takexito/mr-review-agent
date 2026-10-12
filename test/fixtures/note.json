@@ -1,0 +1,25 @@
+{
+  "object_kind": "note",
+  "event_type": "note",
+  "user": {
+    "id": 42,
+    "username": "alice",
+    "name": "Alice Dev"
+  },
+  "project": {
+    "id": 101,
+    "path_with_namespace": "acme/android-app"
+  },
+  "object_attributes": {
+    "id": 900001,
+    "note": "@codex review пожалуйста, посмотри маппер",
+    "noteable_type": "MergeRequest",
+    "discussion_id": "abc123def456",
+    "url": "https://gitlab.com/acme/android-app/-/merge_requests/7#note_900001"
+  },
+  "merge_request": {
+    "iid": 7,
+    "source_branch": "feature/route-mapper",
+    "target_branch": "develop"
+  }
+}
