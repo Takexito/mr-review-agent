@@ -39,19 +39,20 @@ function clip(text: string): string {
 /**
  * Ссылки на источники приходят из описания MR, а его пишет автор MR. Без этой проверки
  * `чужая-группа/проект#1` заставил бы бота скачать своим токеном задачу проекта, которого
- * автор не видит, и процитировать её в заметке.
+ * автор не видит, и процитировать её в заметке. `PROJECT_ALLOWLIST` сюда не входит намеренно:
+ * он говорит, где бот отвечает, а не что автор одного проекта вправе читать в другом.
  */
 function isAllowedProject(ctx: GatherContext, target: string): boolean {
   const link = parseShortRef(target, String(ctx.projectId)) ?? parseGitlabUrl(ctx.config.gitlabHost, target);
   if (!link) return false;
-  const allowed = [String(ctx.projectId), ctx.projectPath, ctx.config.docsRepoProject, ...ctx.config.projectAllowlist];
+  const allowed = [String(ctx.projectId), ctx.projectPath, ctx.config.docsRepoProject];
   return allowed.some((project) => project.toLowerCase() === link.project.toLowerCase());
 }
 
 async function gitlabSource(ctx: GatherContext, target: string): Promise<SpecSource | string> {
   const { config } = ctx;
   if (!isAllowedProject(ctx, target)) {
-    return `Источник ${target} не скачан: он вне проекта этого MR и списка разрешённых проектов.`;
+    return `Источник ${target} не скачан: он вне проекта этого MR и проекта документации.`;
   }
   const text = await fetchGitlabUrl(
     {

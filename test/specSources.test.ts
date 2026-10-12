@@ -57,7 +57,7 @@ describe('gatherSpecSources', () => {
       gitlabToken: 'bot',
       gitlabReadToken: 'read',
       docsRepoProject: 'g/docs',
-      projectAllowlist: ['g/p'],
+      projectAllowlist: ['g/p', 'g/other'],
     } as unknown as AppConfig,
     projectId: 7,
     projectPath: 'g/p',
@@ -100,7 +100,7 @@ describe('gatherSpecSources: project boundary', () => {
       gitlabHost: HOST,
       gitlabToken: 'bot',
       docsRepoProject: 'g/docs',
-      projectAllowlist: ['g/p'],
+      projectAllowlist: ['g/p', 'g/other'],
     } as unknown as AppConfig,
     projectId: 7,
     projectPath: 'g/p',
@@ -115,10 +115,12 @@ describe('gatherSpecSources: project boundary', () => {
     const result = await gatherSpecSources(ctx, [
       { kind: 'gitlab', target: 'secret-group/payroll#1' },
       { kind: 'gitlab', target: 'https://gitlab.com/secret-group/payroll/-/issues/2' },
+      // В PROJECT_ALLOWLIST, но это другой проект: автор MR в g/p не обязан его видеть.
+      { kind: 'gitlab', target: 'g/other#5' },
     ]);
 
     expect(result.sources).toEqual([]);
-    expect(result.degraded).toHaveLength(2);
+    expect(result.degraded).toHaveLength(3);
     expect(result.degraded[0]).toContain('вне проекта этого MR');
     expect(fetchMock).not.toHaveBeenCalled();
   });
