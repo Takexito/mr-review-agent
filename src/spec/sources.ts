@@ -1,6 +1,6 @@
 import type { AppConfig } from '../config.js';
 import type { Logger } from '../logger.js';
-import { fetchGitlabUrl } from '../gitlab/fetchUrl.js';
+import { fetchGitlabUrl, parseGitlabUrl, parseShortRef } from '../gitlab/fetchUrl.js';
 import { fetchRequirements } from '../linear/requirements.js';
 import { specRefLabel, type SpecRef } from './refs.js';
 
@@ -21,6 +21,7 @@ export interface GatheredSources {
 export interface GatherContext {
   readonly config: AppConfig;
   readonly projectId: number;
+  readonly projectPath: string;
   readonly downloadDir: string;
   readonly log: Logger;
 }
@@ -35,8 +36,23 @@ function clip(text: string): string {
     : text;
 }
 
-async function gitlabSource(ctx: GatherContext, target: string): Promise<SpecSource> {
+/**
+ * Ссылки на источники приходят из описания MR, а его пишет автор MR. Без этой проверки
+ * `чужая-группа/проект#1` заставил бы бота скачать своим токеном задачу проекта, которого
+ * автор не видит, и процитировать её в заметке.
+ */
+function isAllowedProject(ctx: GatherContext, target: string): boolean {
+  const link = parseShortRef(target, String(ctx.projectId)) ?? parseGitlabUrl(ctx.config.gitlabHost, target);
+  if (!link) return false;
+  const allowed = [String(ctx.projectId), ctx.projectPath, ctx.config.docsRepoProject, ...ctx.config.projectAllowlist];
+  return allowed.some((project) => project.toLowerCase() === link.project.toLowerCase());
+}
+
+async function gitlabSource(ctx: GatherContext, target: string): Promise<SpecSource | string> {
   const { config } = ctx;
+  if (!isAllowedProject(ctx, target)) {
+    return `Источник ${target} не скачан: он вне проекта этого MR и списка разрешённых проектов.`;
+  }
   const text = await fetchGitlabUrl(
     {
       host: config.gitlabHost,
