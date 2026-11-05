@@ -6,7 +6,7 @@ import { parseAnswerOutput, parseReviewOutput } from '../../codex/parseReview.js
 import { parseSpecOutput } from '../../codex/parseSpec.js';
 import { parseStandardsOutput } from '../../codex/parseStandards.js';
 import { buildCombinedNote, type AxisSection } from '../../gitlab/postCombinedReview.js';
-import { bugsSections, placeBugsInline } from '../../gitlab/postReview.js';
+import { bugsSections, placeBugsInline, rankBugs } from '../../gitlab/postReview.js';
 import { placeSpecInline, specSections, type PostSpecOptions } from '../../gitlab/postSpecReview.js';
 import { placeViolationsInline, standardsSections } from '../../gitlab/postStandards.js';
 import { bugsCompletion, bugsPrompt, linkifyBugs } from './bugs.js';
@@ -112,8 +112,9 @@ export const prepareReview: KindHandler = async (ctx) => {
       if (deduped.bugs && bugsReview) {
         const coverage = buildCoverage(diff, bugsReview);
         logCoverage(jlog, coverage);
-        const unplaced = await placeBugsInline(api, data.projectId, data.mrIid, mr, deduped.bugs, jlog);
-        bugsSection = { state: 'ok', lines: bugsSections(deduped.bugs, unplaced, coverage) };
+        const ranked = rankBugs(deduped.bugs);
+        const unplaced = await placeBugsInline(api, data.projectId, data.mrIid, mr, ranked.review, jlog);
+        bugsSection = { state: 'ok', lines: bugsSections(ranked.review, unplaced, coverage, ranked.hiddenInfo) };
       }
 
       let standardsSection = unparsed('standards');

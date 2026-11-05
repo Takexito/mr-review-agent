@@ -122,6 +122,13 @@ export function createProcessor(
     jlog.info('job started');
 
     const mr = await fetchMrDetails(api, data.projectId, data.mrIid);
+    // У смёрдженного MR GitLab удаляет merge-ref, и клон падает невнятной ошибкой git.
+    if (mr.state !== 'opened') {
+      const what = mr.state === 'merged' ? 'уже смёрджен' : 'закрыт';
+      await bestEffort(postAck(api, data.projectId, data.mrIid, `🤖 MR ${what} — ревьюить нечего.`));
+      jlog.info({ state: mr.state }, 'mr not open, nothing to do');
+      return;
+    }
     // «Взял в работу» — реакцией на коммент-триггер (идемпотентно на ретраях, без дубля заметок).
     await bestEffort(reactToNote(api, data.projectId, data.mrIid, data.noteId, ACK_REACTION));
 
@@ -281,6 +288,7 @@ export function createProcessor(
       if (output === null) return; // rate-limit: уведомили, не ретраим
 
       await prepared.publish(output, (prompt) => rerunAgent(agent, prompt, runOptions, jlog));
+      await bestEffort(warnIfStale(api, data.projectId, data.mrIid, mr.headSha, jlog));
       jlog.info('job done');
     } finally {
       await removeWorktree(cacheDir, worktree);
@@ -295,6 +303,22 @@ interface RunCtx {
   readonly projectId: number;
   readonly mrIid: number;
   readonly jlog: Logger;
+}
+
+/**
+ * Ревью идёт десятки минут: автор успевает запушить. Замечания при этом остаются привязаны к
+ * проверенной версии, но читатель должен знать, что под ними уже другой код.
+ */
+async function warnIfStale(api: GitlabClient, projectId: number, mrIid: number, reviewedSha: string, jlog: Logger): Promise<void> {
+  const current = await fetchMrDetails(api, projectId, mrIid);
+  if (current.headSha === reviewedSha) return;
+  jlog.info({ reviewed: reviewedSha, current: current.headSha }, 'mr changed during review');
+  await postAck(
+    api,
+    projectId,
+    mrIid,
+    `🤖 Ревью выполнено по коммиту \`${reviewedSha.slice(0, 8)}\`; пока оно шло, в MR появились новые коммиты — часть замечаний может быть неактуальна.`,
+  );
 }
 
 /**

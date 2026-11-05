@@ -8,6 +8,8 @@ export interface MrDetails {
   readonly startSha: string;
   readonly title: string;
   readonly description: string;
+  /** `opened` | `merged` | `closed` | `locked`. */
+  readonly state: string;
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -54,6 +56,7 @@ export async function fetchMrDetails(
     startSha,
     title: pickString(mr, 'title', 'title') ?? '',
     description: pickString(mr, 'description', 'description') ?? '',
+    state: pickString(mr, 'state', 'state') ?? '',
   };
 }
 

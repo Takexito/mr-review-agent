@@ -1,4 +1,4 @@
-import { contextSection, coverageFields, diffSection, type DiffPromptInput } from './prompts.js';
+import { contextSection, coverageFields, diffSection, outOfScopeSection, type DiffPromptInput } from './prompts.js';
 
 export const STANDARDS_BEGIN = '=== BEGIN_STANDARDS_JSON ===';
 export const STANDARDS_END = '=== END_STANDARDS_JSON ===';
@@ -63,8 +63,9 @@ export function buildStandardsPrompt(input: StandardsPromptInput): string {
     'Стандарт — документ репозитория о том, КАК здесь пишут код: `AGENTS.md` и `CLAUDE.md` (в корне и в каталогах',
     'изменённых файлов), `CONTEXT.md`, `CONTRIBUTING.md`, `docs/adr/`, `docs/guides/`, руководства по тестам, скиллы агентов.',
     'Найди их поиском по репозиторию и прочитай те, что касаются изменённых модулей.',
-    'Конфиги линтеров и форматтеров (detekt, lint, `.editorconfig`, CI) прочитай отдельно: правило, которое проверяет',
-    'инструмент, — зона инструмента.',
+    'Конфиги линтеров и форматтеров (detekt, lint, `.editorconfig`, CI) прочитай отдельно — по ним видно, что ловит инструмент.',
+    'Документы вроде `AGENTS.md` написаны для агента, который пишет код: указания о том, как вести работу, что спрашивать',
+    'и какие команды запускать, к готовому коду не относятся. Сверяй только требования к самому коду.',
     'Шаг завершён, когда каждый найденный документ либо прочитан и записан в "standardsRead", либо отброшен как не относящийся к изменённому коду.',
     '',
     'ШАГ 2 — ПРОЙДИ ДИФФ.',
@@ -74,6 +75,7 @@ export function buildStandardsPrompt(input: StandardsPromptInput): string {
     'ШАГ 3 — ЗАПАХИ.',
     'Пройди дифф по базовому набору ниже. Запах — оценочное суждение: формулируй как «возможно, <запах>» и объясняй, чем он здесь мешает.',
     'Правило репозитория сильнее базового набора: то, что документ одобряет, запахом не считается.',
+    ...outOfScopeSection(),
     '',
     'БАЗОВЫЙ НАБОР ЗАПАХОВ (что это → как чинить):',
     ...SMELL_BASELINE.map((s) => `- ${s}`),

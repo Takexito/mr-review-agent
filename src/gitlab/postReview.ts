@@ -8,6 +8,28 @@ export type { DiffRefs } from './inline.js';
 
 export const BUGS_HEADING = '## 🤖 Codex · поиск багов';
 
+/** Больше мелких замечаний тредами не публикуем: они тонут сами и топят важное. */
+export const MAX_INFO_COMMENTS = 5;
+
+const SEVERITY_ORDER: Record<ReviewComment['severity'], number> = { blocker: 0, warn: 1, info: 2 };
+
+export interface RankedBugs {
+  readonly review: Review;
+  /** Сколько info-замечаний сверх лимита не опубликовано. */
+  readonly hiddenInfo: number;
+}
+
+/**
+ * Сортирует по важности и срезает info сверх лимита. В общем `review` вызывать после
+ * `applyDuplicates`: идентификаторы повторов указывают на исходный порядок находок.
+ */
+export function rankBugs(review: Review): RankedBugs {
+  const sorted = [...review.comments].sort((a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity]);
+  const firstInfo = sorted.findIndex((c) => c.severity === 'info');
+  const kept = firstInfo === -1 ? sorted : sorted.slice(0, firstInfo + MAX_INFO_COMMENTS);
+  return { review: { ...review, comments: kept }, hiddenInfo: sorted.length - kept.length };
+}
+
 const SEVERITY_EMOJI: Record<ReviewComment['severity'], string> = {
   blocker: '🔴',
   warn: '🟡',
@@ -31,8 +53,13 @@ export async function postReview(
   log: Logger,
   coverage?: DiffCoverage,
 ): Promise<void> {
-  const unplaced = await placeBugsInline(api, projectId, mrIid, refs, review, log);
-  await api.MergeRequestNotes.create(projectId, mrIid, buildSummary(review, unplaced, coverage));
+  const ranked = rankBugs(review);
+  const unplaced = await placeBugsInline(api, projectId, mrIid, refs, ranked.review, log);
+  await api.MergeRequestNotes.create(
+    projectId,
+    mrIid,
+    buildSummary(ranked.review, unplaced, coverage, ranked.hiddenInfo),
+  );
 }
 
 /** Создаёт inline-треды замечаний; возвращает те, чью позицию GitLab не принял. */
@@ -76,12 +103,22 @@ function disputedSection(review: Review): string[] {
   return lines;
 }
 
-export function buildSummary(review: Review, unplaced: ReviewComment[], coverage?: DiffCoverage): string {
-  return [BUGS_HEADING, ...bugsSections(review, unplaced, coverage)].join('\n');
+export function buildSummary(
+  review: Review,
+  unplaced: ReviewComment[],
+  coverage?: DiffCoverage,
+  hiddenInfo = 0,
+): string {
+  return [BUGS_HEADING, ...bugsSections(review, unplaced, coverage, hiddenInfo)].join('\n');
 }
 
 /** Тело заметки оси без заголовка — его же вставляет сводка общего `review`. */
-export function bugsSections(review: Review, unplaced: readonly ReviewComment[], coverage?: DiffCoverage): string[] {
+export function bugsSections(
+  review: Review,
+  unplaced: readonly ReviewComment[],
+  coverage?: DiffCoverage,
+  hiddenInfo = 0,
+): string[] {
   const total = review.comments.length;
   const placed = total - unplaced.length;
   const lines: string[] = [];
@@ -93,6 +130,9 @@ export function bugsSections(review: Review, unplaced: readonly ReviewComment[],
   lines.push(...coverageWarning(coverage));
 
   lines.push('', `Замечаний: **${total}** (inline: ${placed}${unplaced.length ? `, ниже: ${unplaced.length}` : ''}).`);
+  if (hiddenInfo > 0) {
+    lines.push(`_Ещё мелких замечаний (info): ${hiddenInfo} — не опубликованы, чтобы не топить важное._`);
+  }
 
   if (unplaced.length > 0) {
     lines.push('', '### Не удалось привязать к строкам');
