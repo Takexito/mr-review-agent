@@ -137,6 +137,25 @@ describe('parseServiceConfig', () => {
     expect(errorOf(() => parseServiceConfig(yaml, ENV))).toContain('cliTools');
   });
 
+  it('should read related repositories of a profile with ref defaulting to the default branch', () => {
+    const yaml = `${MINIMAL}    related:\n      - { project: acme/docs, hint: Контракты API }\n      - { project: acme/backend, ref: same-branch }\n`;
+    const config = parseServiceConfig(yaml, ENV);
+    expect(config.profiles[0]!.related).toEqual([
+      { project: 'acme/docs', hint: 'Контракты API' },
+      { project: 'acme/backend', ref: 'same-branch' },
+    ]);
+  });
+
+  it('should reject the same related repository listed twice in a profile', () => {
+    const yaml = `${MINIMAL}    related:\n      - { project: g/docs }\n      - { project: g/docs, ref: dev }\n`;
+    expect(errorOf(() => parseServiceConfig(yaml, ENV))).toContain('g/docs');
+  });
+
+  it('should reject a related repository that is not a group/project path', () => {
+    const yaml = `${MINIMAL}    related:\n      - { project: "../etc" }\n`;
+    expect(errorOf(() => parseServiceConfig(yaml, ENV))).toContain('related');
+  });
+
   it('should reject unknown keys to catch typos', () => {
     const yaml = MINIMAL.replace('server:', 'server:\n  prot: 1');
     expect(errorOf(() => parseServiceConfig(yaml, ENV))).toContain('prot');

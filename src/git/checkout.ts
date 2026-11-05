@@ -71,6 +71,22 @@ export async function hasCommit(cacheDir: string, sha: string): Promise<boolean>
   }
 }
 
+/**
+ * `clone --bare` пишет HEAD один раз, а `fetch` его не трогает: после переименования ветки
+ * по умолчанию на сервере HEAD кэша указывает на удалённую `--prune` ветку.
+ */
+export async function refreshDefaultBranch(cacheDir: string, remoteUrl: string): Promise<void> {
+  let stdout: string;
+  try {
+    ({ stdout } = await execa('git', ['-C', cacheDir, 'ls-remote', '--symref', remoteUrl, 'HEAD']));
+  } catch (error) {
+    const stderr = (error as { stderr?: unknown }).stderr;
+    throw new Error(redactSecrets(`git ls-remote failed${typeof stderr === 'string' ? `: ${stderr.trim()}` : ''}`));
+  }
+  const head = /^ref: (refs\/heads\/\S+)\tHEAD$/m.exec(stdout)?.[1];
+  if (head) await execa('git', ['-C', cacheDir, 'symbolic-ref', 'HEAD', head]);
+}
+
 export interface EnsureCacheOptions {
   /**
    * IID мерж-реквеста. Если задан, дополнительно тянем `refs/merge-requests/<iid>/head`:
@@ -114,6 +130,7 @@ export async function ensureBareCache(
 
     if (await exists(join(dir, 'HEAD'))) {
       await gitWithToken(['-C', dir, 'fetch', '--prune', '--quiet', withToken, ...refspecs]);
+      await refreshDefaultBranch(dir, withToken);
     } else {
       await rm(dir, { recursive: true, force: true });
       await gitWithToken(['clone', '--bare', '--quiet', withToken, dir]);
@@ -135,7 +152,7 @@ export async function ensureBareCache(
 }
 
 /**
- * Каталог джобы. Внутри лежит `repo/` (cwd агента) и рядом — `docs-repo/`, `linear/`.
+ * Каталог джобы. Внутри лежит `repo/` (cwd агента) и рядом — `related/`, `mr/`, `gitlab-files/`.
  * Соседние каталоги, а не подкаталоги репозитория: иначе они засоряют worktree и
  * вылезают в `git status`/`git diff` как untracked.
  */

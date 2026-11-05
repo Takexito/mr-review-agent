@@ -115,7 +115,7 @@ export async function runCodex(prompt: string, options: RunCodexOptions): Promis
   if (config.codexReasoning) args.push('-c', `model_reasoning_effort=${config.codexReasoning}`);
   for (const override of codexMcpOverrides(access?.connectors ?? [])) args.push('-c', override);
   // Промпт передаём через stdin (`-`), а не позиционным argv: большие SPEC/REVIEW-промпты
-  // (дифф + требования + docs-repo) превышают MAX_ARG_STRLEN (128 КБ) и падают с E2BIG на execve.
+  // (дифф + требования + треды) превышают MAX_ARG_STRLEN (128 КБ) и падают с E2BIG на execve.
   args.push('-');
 
   try {

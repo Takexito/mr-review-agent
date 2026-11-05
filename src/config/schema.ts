@@ -7,6 +7,11 @@ const SECRET_PREFIX = 'secret:';
 const CONNECTOR_NAME = /^[A-Za-z0-9-]+$/;
 // Значение уходит в `Bash(<tool> *)` у claude: `*` или пробел открыли бы любую команду.
 const CLI_TOOL_NAME = /^[A-Za-z0-9._-]+$/;
+// Путь уходит в URL клона и в имя каталога рядом с worktree: `..` вывел бы его за каталог джобы.
+const PROJECT_PATH = /^[A-Za-z0-9_][\w.-]*(\/[A-Za-z0-9_][\w.-]*)+$/;
+
+/** `ref` смежного репозитория: ветка с тем же именем, что у MR, если она есть. */
+export const SAME_BRANCH = 'same-branch';
 
 export const DEFAULT_TIMEOUT_MS = 1_800_000;
 
@@ -73,6 +78,14 @@ export function buildServiceSchema(env: Env) {
       message: 'нужно ровно одно из command (stdio) или url (http)',
     });
 
+  const related = z
+    .object({
+      project: z.string().regex(PROJECT_PATH, 'ожидается путь group/project'),
+      ref: z.string().min(1).optional(),
+      hint: z.string().optional(),
+    })
+    .strict();
+
   const profile = z
     .object({
       name: z.string().min(1),
@@ -81,6 +94,7 @@ export function buildServiceSchema(env: Env) {
       connectors: z.array(z.string()).default([]),
       agentNetwork: z.boolean().default(false),
       cliTools: z.array(z.string().regex(CLI_TOOL_NAME, 'имя команды без шаблонов и пробелов')).default([]),
+      related: z.array(related).default([]),
     })
     .strict();
 
@@ -177,6 +191,17 @@ export function buildServiceSchema(env: Env) {
           if (!config.engines[e]) {
             ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['profiles', i, 'engines'], message: `движок ${e} не настроен` });
           }
+        }
+        const seen = new Set<string>();
+        for (const r of p.related) {
+          if (seen.has(r.project)) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              path: ['profiles', i, 'related'],
+              message: `смежный репозиторий ${r.project} указан дважды`,
+            });
+          }
+          seen.add(r.project);
         }
         if (p.cliTools.length > 0 && !p.agentNetwork) {
           ctx.addIssue({

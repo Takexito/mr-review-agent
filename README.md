@@ -15,7 +15,7 @@ GitLab MR-агент на подписке **Codex** (не API). Тегаешь 
 GitLab (webhook: Note events) ──▶ POST /webhook (X-Gitlab-Token)
   └▶ Fastify: verify → parse → intent(@codex review | bugs | standards | spec | <вопрос>)
      └▶ BullMQ (server.queueConcurrency) ──▶ worker:
-          clone→worktree(SHA) + чекаут docs-repo
+          clone→worktree(SHA) + чекауты смежных репозиториев
           → дифф (inline | agentic) → ось (src/queue/kinds/*): контекст и промпт
           → codex exec в песочнице / claude -p → разбор ответа → пост в MR
 ```
@@ -67,9 +67,14 @@ GitLab (webhook: Note events) ──▶ POST /webhook (X-Gitlab-Token)
 
 ### Контекст требований
 
-- **Документация** (`DOCS_REPO_PROJECT`) выкладывается целиком в `<jobdir>/docs-repo`
-  рядом с worktree — агент грепает весь репозиторий доки. Раньше в промпт вклеивались
-  два захардкоженных файла, обрезанных до 120 КБ.
+- **Смежные репозитории** (ADR 0005): документация, бэкенд для клиентского MR и прочий нужный
+  агенту код перечисляются в `related` профиля (`{project, ref, hint}`). Бот выкладывает каждый
+  полным чекаутом в `<jobdir>/related/<group>+<project>` рядом с worktree; агент грепает его
+  целиком, а codex — и любую ветку (`git -C <каталог> show <ветка>:<файл>`) без сети: кэш — полный
+  bare-клон, HEAD которого обновляется при каждом fetch. У claude `Bash(git show *)` такую команду не
+  пропускает, ему доступна только выложенная ветка. `ref` — ветка (по умолчанию ветка репозитория по умолчанию) или `same-branch`:
+  ветка с именем ветки MR, если она там есть, иначе ветка по умолчанию. Недоступный репозиторий
+  или ветка не роняет джобу — попадает в «Неполные источники».
 - **Коннекторы** (ADR 0002): Linear, GitLab и любая другая система подключаются записью в
   `connectors` файла `service.yaml` — готовый MCP-сервер (stdio-команда или URL), токены по
   `secret:NAME`, необязательный список инструментов `tools` и подсказка `hint` для промпта.
@@ -250,8 +255,8 @@ curl -X POST localhost:8080/webhook \
 поля-токены принимают только `secret:NAME`, значение берётся из переменной окружения (`.env`). Ошибки
 конфигурации — все сразу — сервис печатает при запуске и не стартует.
 
-В `.env` — секреты и временные переменные, которые уходят в шагах 3–4 `docs/plan/connectors-and-profiles.md`:
-`LINEAR_API_*` (предзагрузка постановки ботом), `DOCS_REPO_*`.
+В `.env` — секреты и временные переменные, которые уходят в шаге 4 `docs/plan/connectors-and-profiles.md`:
+`LINEAR_API_*` (предзагрузка постановки ботом).
 Отладочная `CODEX_FAIL_LOG` (путь к файлу) в `.env` не нужна — её задают на один запуск.
 
 После правки `service.yaml` или `.env` контейнер нужно пересоздать: `docker compose up -d codex-bot`.

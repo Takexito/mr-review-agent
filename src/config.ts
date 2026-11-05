@@ -28,8 +28,6 @@ export interface EngineBinding {
 const TransitionalEnvSchema = z.object({
   LINEAR_API_KEY: z.string().optional(),
   LINEAR_API_URL: z.string().url().default('https://api.linear.app/graphql'),
-  DOCS_REPO_PROJECT: z.string().default('acme/docs'),
-  DOCS_REPO_REF: z.string().default('master'),
 });
 
 export interface LinearConfig {
@@ -49,6 +47,14 @@ export interface ProjectProfile {
   readonly connectors: readonly string[];
   readonly agentNetwork: boolean;
   readonly cliTools: readonly string[];
+  readonly related: readonly RelatedRepo[];
+}
+
+export interface RelatedRepo {
+  readonly project: string;
+  /** Ветка или `same-branch`, см. `chooseRelatedRef`. */
+  readonly ref?: string;
+  readonly hint?: string;
 }
 
 export interface AppConfig extends LinearConfig {
@@ -82,9 +88,6 @@ export interface AppConfig extends LinearConfig {
   readonly maxDiffLines: number;
   readonly coverageFollowup: { readonly runs: number; readonly batch: number };
   readonly queueConcurrency: number;
-  /** Проект с документацией/контрактами (path_with_namespace). */
-  readonly docsRepoProject: string;
-  readonly docsRepoRef: string;
   readonly redisUrl: string;
   readonly connectors: Readonly<Record<string, ConnectorConfig>>;
   /** Порядок важен: побеждает первый совпавший, см. `resolveProfile`. */
@@ -152,8 +155,6 @@ export function parseServiceConfig(yamlText: string, env: NodeJS.ProcessEnv): Ap
     coverageFollowup: file.review.coverageFollowup,
     linearApiKey: legacy.LINEAR_API_KEY || undefined,
     linearApiUrl: legacy.LINEAR_API_URL,
-    docsRepoProject: legacy.DOCS_REPO_PROJECT,
-    docsRepoRef: legacy.DOCS_REPO_REF,
     connectors: file.connectors,
     profiles: file.profiles.map((p) => ({ ...p, engines: p.engines ?? configured })),
   };

@@ -2,7 +2,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Job } from 'bullmq';
 import type { JobData } from './job.js';
-import { resolveProfile, type AppConfig, type EngineName } from '../config.js';
+import { resolveProfile, type AppConfig, type EngineName, type ProjectProfile } from '../config.js';
 import type { Logger } from '../logger.js';
 import type { GitlabClient } from '../gitlab/client.js';
 import type { Agent, RunOptions } from '../agent/types.js';
@@ -20,7 +20,7 @@ import {
 import { computeDiff } from '../git/diff.js';
 import { CURRENT_THREAD_MARK, fetchThreads, truncateThreads } from '../gitlab/discussions.js';
 import { makeBlobLinker } from '../gitlab/links.js';
-import { gatherDocsRepo } from '../docs/docsRepo.js';
+import { checkoutRelated, type RelatedCheckout, type RelatedResult } from '../related/checkout.js';
 import { prepareAsk } from './kinds/ask.js';
 import { prepareBugs } from './kinds/bugs.js';
 import { prepareReview } from './kinds/review.js';
@@ -55,14 +55,20 @@ async function bestEffort(promise: Promise<unknown>): Promise<void> {
 }
 
 /** Джоба могла встать в очередь до правки `service.yaml`, убравшей профиль, — тогда агенту ничего не открываем. */
-function agentAccess(config: AppConfig, projectPath: string): AgentAccess {
-  const profile = resolveProfile(config, projectPath);
+function agentAccess(config: AppConfig, profile: ProjectProfile | undefined): AgentAccess {
   if (!profile) return NO_ACCESS;
   return {
     connectors: profile.connectors.map((name) => ({ name, config: config.connectors[name]! })),
     agentNetwork: profile.agentNetwork,
     cliTools: profile.cliTools,
   };
+}
+
+function relatedHint(repo: RelatedCheckout, engine: EngineName): string {
+  let text = `Смежный репозиторий \`${repo.project}\` (ветка \`${repo.ref}\`) выложен в \`${repo.dir}\` — grep/read по всему репозиторию.`;
+  // У claude `Bash(git show *)` не совпадает с `git -C …`, и dontAsk отклонит команду.
+  if (engine === 'codex') text += ` Другие ветки — \`git -C ${repo.dir} show <ветка>:<файл>\`.`;
+  return repo.hint ? `${text} ${repo.hint}` : text;
 }
 
 function accessHints(access: AgentAccess): string[] {
@@ -181,32 +187,26 @@ export function createProcessor(
 
     const jobDir = await createJobDir();
     const worktree = await addWorktreeAt(cacheDir, mr.headSha, join(jobDir, 'repo'));
-    let docsCacheDir: string | null = null;
-    let docsDir: string | null = null;
+    let relatedCheckouts: RelatedResult | null = null;
     try {
       // Треды нужны всем режимам: осям ревью — для дедупа уже поднятого, ASK — чтобы
       // видеть тред, в который отвечает (реплай на собственное замечание бота).
       const mrFiles = await writeMrFiles(api, data, mr, jobDir, jlog);
 
-      // Доку выкладываем на диск для всех режимов, а не только SPEC: вопрос про контракт
-      // может прийти и в ASK, и в обычном ревью.
-      const docs = await gatherDocsRepo(config, jobDir, jlog);
-      docsCacheDir = docs.cacheDir;
-      docsDir = docs.dir;
+      const profile = resolveProfile(config, data.projectPath);
+      const related = await checkoutRelated(profile?.related ?? [], { jobDir, sourceBranch: mr.sourceBranch }, jlog, {
+        ensureCache: (project) => ensureBareCache(config, project),
+      });
+      relatedCheckouts = related;
+      jlog.info({ related: related.repos.map((r) => `${r.project}@${r.ref}`) }, 'related repositories ready');
 
-      const degraded: string[] = [];
-      if (!docs.ok) degraded.push('docs-repo недоступен боту — без сверки API-контрактов.');
-
+      const degraded: string[] = [...related.degraded];
       const contextHints: string[] = [
         `Описание MR и все его обсуждения целиком лежат в \`${mrFiles.dir}\` (\`description.md\`, \`threads.md\`).`,
+        ...related.repos.map((r) => relatedHint(r, agent.name)),
       ];
-      if (docs.dir) {
-        contextHints.push(
-          `Документация и API-контракты (источник истины) выложены в \`${docs.dir}\` — grep/read по всему репозиторию доки.`,
-        );
-      }
 
-      const access = agentAccess(config, data.projectPath);
+      const access = agentAccess(config, profile);
       contextHints.push(...accessHints(access));
 
       // Создаём заранее: `--add-dir` у claude принимает только существующий каталог.
@@ -239,14 +239,10 @@ export function createProcessor(
         linkify: makeBlobLinker(worktree, config.gitlabHost, data.projectPath, mr.headSha),
       });
 
-      const readDirs = [docsDir, mrFiles.dir, downloadDir, ...(prepared.readDirs ?? [])].filter(
-        (d): d is string => d !== null,
-      );
+      const readDirs = [...related.repos.map((r) => r.dir), mrFiles.dir, downloadDir, ...(prepared.readDirs ?? [])];
       const runOptions: RunOptions = {
         cwd: worktree,
         jobDir,
-        // Только реально существующие каталоги: `--add-dir` на несуществующий путь
-        // claude проглатывает, но передавать его нечестно.
         readDirs,
         ...(prepared.needsWrite ? { needsWrite: true } : {}),
         access,
@@ -261,7 +257,7 @@ export function createProcessor(
       jlog.info('job done');
     } finally {
       await removeWorktree(cacheDir, worktree);
-      if (docsCacheDir && docsDir) await removeWorktree(docsCacheDir, docsDir);
+      await relatedCheckouts?.cleanup();
       await removeJobDir(jobDir);
     }
   };

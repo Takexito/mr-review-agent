@@ -16,7 +16,10 @@
   - Серверы для примера: `@zereight/mcp-gitlab` (`GITLAB_PERMISSION_MODE=readonly`), `@tacticlaunch/mcp-linear`. Имена инструментов в `tools` сверить по `tools/list` при подключении.
   - `cliTools` пока только разрешает команду (`Bash(<tool> *)` у claude); токен для CLI в окружение агента не передаётся.
   - Остаётся в env до шага 4: `LINEAR_API_*` — ими бот скачивает задачу-постановку (`spec/sources.ts`). Задачи GitLab для оси постановки бот качает токеном бота codex; `GITLAB_READ_TOKEN` удалён.
-- [ ] **3. Смежные репозитории** ([0005](../adr/0005-related-repos-are-disk-checkouts.md)). `related` в профиле, `same-branch`, `docs-repo` — через этот механизм.
+- [x] **3. Смежные репозитории** ([0005](../adr/0005-related-repos-are-disk-checkouts.md)). `related` в профиле, `same-branch`, `docs-repo` — через этот механизм.
+  - `related: [{project, ref?, hint?}]` в профиле; выкладка — `src/related/checkout.ts`, каталог `<jobdir>/related/<group>+<project>`. `DOCS_REPO_*` удалены: docs-repo — запись в `related`.
+  - Взятая ветка пока печатается в лог (`related repositories ready`) и в промпт; в шапку заметки — в шаге 6, вместе с «Открыто агентом».
+  - Чекаут доступен агенту на запись, когда codex в `workspace-write` (общий `review`, `agentNetwork`): каталог джобы лежит в TMPDIR. Bare-кэш при этом защищён — он вне TMPDIR.
 - [ ] **4. Новая предзагрузка** ([0003](../adr/0003-prefetch-only-direct-targets.md)). Правила прямых целей и `issueKeys`; бот — MCP-клиент коннектора; привязанные документы; режимы inline/файлы с проверкой, что каждая цель в чек-листе; картинки из описания MR и целей. Удалить старую `spec/sources.ts` и поиск ключей по всему описанию.
 - [ ] **5. `.review.yml` в репозитории** ([0004](../adr/0004-two-layer-config-one-deploy-per-org.md)). Чтение из target-ветки, слияние с профилем (только сужение коннекторов, смежные репозитории из allowlist).
-- [ ] **6. Журнал вызовов.** Разбор событий `codex exec --json` / `claude --output-format stream-json`; «Открыто агентом: …» в шапке заметки.
+- [ ] **6. Журнал вызовов.** Разбор событий `codex exec --json` / `claude --output-format stream-json`; «Открыто агентом: …» и ветки смежных репозиториев в шапке заметки.
