@@ -280,7 +280,7 @@ export function createProcessor(
       const output = await runAgentOrNotify(agent, prepared.prompt, runOptions, runCtx);
       if (output === null) return; // rate-limit: уведомили, не ретраим
 
-      await prepared.publish(output);
+      await prepared.publish(output, (prompt) => rerunAgent(agent, prompt, runOptions, jlog));
       jlog.info('job done');
     } finally {
       await removeWorktree(cacheDir, worktree);
@@ -295,6 +295,19 @@ interface RunCtx {
   readonly projectId: number;
   readonly mrIid: number;
   readonly jlog: Logger;
+}
+
+/**
+ * Дополнительный прогон уже после основного: его сбой не должен ронять джобу и терять
+ * готовое ревью, поэтому любая ошибка — это null, и публикуется то, что есть.
+ */
+async function rerunAgent(agent: Agent, prompt: string, options: RunOptions, jlog: Logger): Promise<string | null> {
+  try {
+    return await agent.run(prompt, options);
+  } catch (error) {
+    jlog.warn({ err: String(error) }, 'agent rerun failed');
+    return null;
+  }
 }
 
 /** Запускает движок; на rate-limit постит заметку и возвращает null (без ретрая). */

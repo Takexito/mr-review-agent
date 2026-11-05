@@ -18,6 +18,7 @@ function coverage(over: Partial<DiffCoverage> = {}): DiffCoverage {
   return {
     mode: 'agentic',
     changedFiles: CHANGED,
+    binaryFiles: [],
     reviewedFiles: CHANGED,
     skippedFiles: [],
     ...over,
@@ -96,6 +97,15 @@ describe('покрытие диффа', () => {
     expect(text).toContain('не отчитался');
     // Полотно из 40 путей в заметку не лезет.
     expect(text.split('\n').length).toBeLessThan(20);
+  });
+
+  it('не считает бинарные файлы пропуском и отдельно называет их число', () => {
+    const text = coverageWarning(coverage({ binaryFiles: ['app/golden.png', 'app/icon.webp'] })).join('\n');
+
+    expect(text).toContain('просмотрено 3/3');
+    expect(text).toContain('Бинарные файлы (2)');
+    expect(text).not.toContain('golden.png');
+    expect(text).not.toContain('не означает, что MR чист');
   });
 
   it('не падает на пустом диффе', () => {
@@ -231,14 +241,19 @@ describe('review-промпт в agentic-режиме', () => {
     expect(prompt).not.toContain('ДИФФ НЕ ПРИЛОЖЕН');
   });
 
-  it('помечает бинарные файлы в чеклисте, чтобы агент не искал в них строки', () => {
+  it('выносит бинарные файлы из чеклиста, чтобы агент не тратил на них ходы', () => {
     const prompt = buildReviewPrompt({
       ...base,
       diffMode: 'agentic',
       diff: '',
-      files: [{ path: 'logo.png', added: 0, deleted: 0, binary: true }],
+      files: [
+        { path: 'A.kt', added: 1, deleted: 1, binary: false },
+        { path: 'logo.png', added: 0, deleted: 0, binary: true },
+      ],
     });
 
-    expect(prompt).toContain('logo.png (binary)');
+    expect(prompt).toContain('ЧЕКЛИСТ — 1 изменённых файлов');
+    expect(prompt).not.toContain('logo.png');
+    expect(prompt).toContain('Бинарные файлы (1');
   });
 });

@@ -9,10 +9,11 @@ import { buildCombinedNote, type AxisSection } from '../../gitlab/postCombinedRe
 import { bugsSections, placeBugsInline } from '../../gitlab/postReview.js';
 import { placeSpecInline, specSections, type PostSpecOptions } from '../../gitlab/postSpecReview.js';
 import { placeViolationsInline, standardsSections } from '../../gitlab/postStandards.js';
-import { bugsPrompt, linkifyBugs } from './bugs.js';
+import { bugsCompletion, bugsPrompt, linkifyBugs } from './bugs.js';
 import { prepareSpecAxis } from './spec.js';
-import { linkifyStandards, standardsPrompt } from './standards.js';
+import { linkifyStandards, standardsCompletion, standardsPrompt } from './standards.js';
 import { buildCoverage, logCoverage, type KindHandler } from './shared.js';
+import { completeCoverage } from './completion.js';
 
 type AxisFile = { readonly state: 'missing' } | { readonly state: 'text'; readonly text: string };
 
@@ -60,7 +61,7 @@ export const prepareReview: KindHandler = async (ctx) => {
     }),
     readDirs: [dir, ...spec.readDirs],
     needsWrite: true,
-    publish: async (orchestratorOutput) => {
+    publish: async (orchestratorOutput, rerun) => {
       const files = new Map<string, AxisFile>();
       for (const task of tasks) files.set(task.axis, await readAxisFile(task.outputFile));
       const text = (name: string): string | null => {
@@ -75,9 +76,19 @@ export const prepareReview: KindHandler = async (ctx) => {
       const standards = standardsText === null ? null : parseStandardsOutput(standardsText);
       const specParsed = specText === null ? null : parseSpecOutput(specText);
 
+      // Дочитанное дописывается в конец списков, поэтому индексы `ось:список:N` из ответа
+      // оркестратора по-прежнему указывают на те же находки.
+      const limits = ctx.config.coverageFollowup;
+      const [bugsReview, standardsReview] = await Promise.all([
+        bugs?.ok ? completeCoverage(diff, bugs.review, bugsCompletion(ctx), rerun, limits, jlog) : null,
+        standards?.ok
+          ? completeCoverage(diff, standards.review, standardsCompletion(ctx), rerun, limits, jlog)
+          : null,
+      ]);
+
       const reviews: AxisReviews = {
-        ...(bugs?.ok ? { bugs: linkifyBugs(bugs.review, linkify) } : {}),
-        ...(standards?.ok ? { standards: linkifyStandards(standards.review, linkify) } : {}),
+        ...(bugsReview ? { bugs: linkifyBugs(bugsReview, linkify) } : {}),
+        ...(standardsReview ? { standards: linkifyStandards(standardsReview, linkify) } : {}),
         ...(specParsed?.ok ? { spec: specParsed.spec } : {}),
       };
       const consolidation = parseOrchestratorOutput(orchestratorOutput);
@@ -98,23 +109,23 @@ export const prepareReview: KindHandler = async (ctx) => {
       };
 
       let bugsSection = unparsed('bugs');
-      if (deduped.bugs && bugs?.ok) {
-        const coverage = buildCoverage(diff, bugs.review);
+      if (deduped.bugs && bugsReview) {
+        const coverage = buildCoverage(diff, bugsReview);
         logCoverage(jlog, coverage);
         const unplaced = await placeBugsInline(api, data.projectId, data.mrIid, mr, deduped.bugs, jlog);
         bugsSection = { state: 'ok', lines: bugsSections(deduped.bugs, unplaced, coverage) };
       }
 
       let standardsSection = unparsed('standards');
-      if (deduped.standards && standards?.ok) {
-        const coverage = buildCoverage(diff, standards.review);
+      if (deduped.standards && standardsReview) {
+        const coverage = buildCoverage(diff, standardsReview);
         const unplaced = await placeViolationsInline(api, data.projectId, data.mrIid, mr, deduped.standards, jlog);
         standardsSection = { state: 'ok', lines: standardsSections(deduped.standards, unplaced, coverage) };
       }
 
       let specSection = unparsed(
         'spec',
-        spec.sources.length === 0 ? `Источник постановки не найден — сверка не запускалась. ${degraded.join(' ')}`.trim() : undefined,
+        spec.sources.length === 0 ? `Сверка с постановкой не запускалась. ${degraded.join(' ')}`.trim() : undefined,
       );
       if (deduped.spec && specParsed?.ok) {
         const options: PostSpecOptions = {

@@ -29,10 +29,7 @@ const MAX_CHECKLIST = 200;
 
 function checklist(files: readonly ChangedFile[]): string[] {
   const shown = files.slice(0, MAX_CHECKLIST);
-  const lines = shown.map((f, i) => {
-    const counts = f.binary ? 'binary' : `+${f.added}/-${f.deleted}`;
-    return `${i + 1}. ${f.path} (${counts})`;
-  });
+  const lines = shown.map((f, i) => `${i + 1}. ${f.path} (+${f.added}/-${f.deleted})`);
   if (files.length > shown.length) {
     lines.push(`…и ещё ${files.length - shown.length} файлов — полный список в diffstat выше.`);
   }
@@ -53,7 +50,8 @@ export function diffSection(input: DiffPromptInput): string[] {
 
   const range = input.baseSha && input.headSha ? `${input.baseSha}..${input.headSha}` : 'base..head';
   const stat = input.diffStat?.trim() ? input.diffStat.trim() : '(diffstat недоступен)';
-  const files = input.files ?? [];
+  const files = (input.files ?? []).filter((f) => !f.binary);
+  const binaries = (input.files ?? []).length - files.length;
 
   return [
     '',
@@ -72,6 +70,12 @@ export function diffSection(input: DiffPromptInput): string[] {
           '',
           `ЧЕКЛИСТ — ${files.length} изменённых файлов. Иди сверху вниз, ни один не пропускай:`,
           ...checklist(files),
+        ]
+      : []),
+    ...(binaries > 0
+      ? [
+          '',
+          `Бинарные файлы (${binaries}, в diffstat помечены \`Bin\`) читать не нужно и в "reviewedFiles"/"skippedFiles" не включай.`,
         ]
       : []),
     '',

@@ -23,8 +23,10 @@ export interface SkippedFile {
 
 export interface DiffCoverage {
   readonly mode: DiffMode;
-  /** Что реально изменено в MR (из `git diff --numstat`). */
+  /** Текстовые файлы, изменённые в MR (из `git diff --numstat`) — их агент обязан прочитать. */
   readonly changedFiles: readonly string[];
+  /** Бинарные изменённые файлы: построчного диффа у них нет, в счёт покрытия не идут. */
+  readonly binaryFiles: readonly string[];
   /** Что агент заявил как просмотренное. Заявке верим только на пересечении с changedFiles. */
   readonly reviewedFiles: readonly string[];
   readonly skippedFiles: readonly SkippedFile[];
@@ -76,10 +78,16 @@ export function coverageWarning(coverage: DiffCoverage | undefined): string[] {
   const { total, reviewed, missed } = computeGaps(coverage);
   if (total === 0) return [];
 
+  const binaryNote =
+    coverage.binaryFiles.length > 0
+      ? [`> Бинарные файлы (${coverage.binaryFiles.length}) не ревьюятся и в счёт не входят.`]
+      : [];
+
   if (missed.length === 0) {
     return [
       '',
       `> ℹ️ Дифф большой — агент читал его пофайлово из репозитория; просмотрено ${reviewed}/${total} файлов.`,
+      ...binaryNote,
     ];
   }
 
@@ -105,8 +113,9 @@ export function coverageWarning(coverage: DiffCoverage | undefined): string[] {
   }
 
   lines.push(
+    ...binaryNote,
     '> Отсутствие замечаний ниже относится только к просмотренной части и **не означает, что MR чист**.',
-    '> Ревью большого MR стоит либо разбить на части, либо поднять `MAX_DIFF_BYTES`/`MAX_DIFF_LINES`.',
+    '> Ревью большого MR стоит либо разбить на части, либо поднять `COVERAGE_FOLLOWUP_RUNS`.',
   );
   return lines;
 }

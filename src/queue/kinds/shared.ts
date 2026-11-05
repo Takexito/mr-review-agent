@@ -6,6 +6,7 @@ import type { DiffCoverage } from '../../gitlab/coverage.js';
 import type { DiffResult } from '../../git/diff.js';
 import type { DiffPromptInput } from '../../codex/prompts.js';
 import type { JobData } from '../job.js';
+import type { AgentRerun } from './completion.js';
 
 /** Всё, что общий пролог процессора подготовил к моменту выбора оси. */
 export interface KindContext {
@@ -37,7 +38,8 @@ export interface PreparedKind {
   readonly readDirs?: readonly string[];
   /** Агенту нужна запись в каталог джобы (оркестратор: суб-агенты пишут туда результаты). */
   readonly needsWrite?: boolean;
-  publish(output: string): Promise<void>;
+  /** `rerun` — повторный прогон тем же движком с теми же правами, для дочитывания пропущенного. */
+  publish(output: string, rerun?: AgentRerun): Promise<void>;
 }
 
 export type KindHandler = (ctx: KindContext) => Promise<PreparedKind>;
@@ -51,7 +53,8 @@ interface CoverageReport {
 export function buildCoverage(diff: DiffResult, report: CoverageReport | null): DiffCoverage {
   return {
     mode: diff.mode,
-    changedFiles: diff.files.map((f) => f.path),
+    changedFiles: diff.files.filter((f) => !f.binary).map((f) => f.path),
+    binaryFiles: diff.files.filter((f) => f.binary).map((f) => f.path),
     reviewedFiles: report?.reviewedFiles ?? [],
     skippedFiles: report?.skippedFiles ?? [],
   };

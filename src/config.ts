@@ -84,6 +84,10 @@ const EnvSchema = z.object({
   /** Второй, более дешёвый гейт: по нему отсекаемся, не материализуя дифф вообще. */
   MAX_DIFF_LINES: z.coerce.number().int().positive().default(20_000),
 
+  /** Дочитывание пропущенных агентом файлов на большом диффе: прогонов на ось и файлов на прогон. */
+  COVERAGE_FOLLOWUP_RUNS: z.coerce.number().int().nonnegative().default(5),
+  COVERAGE_FOLLOWUP_BATCH: z.coerce.number().int().positive().default(40),
+
   QUEUE_CONCURRENCY: z.coerce.number().int().positive().default(2),
 
   // --- SPEC-режим: требования (Linear) + документация (docs-repo) ---
@@ -133,6 +137,7 @@ export interface AppConfig {
   readonly maxDiffBytes: number;
   /** Порог переключения inline → agentic по числу изменённых строк. */
   readonly maxDiffLines: number;
+  readonly coverageFollowup: { readonly runs: number; readonly batch: number };
   readonly queueConcurrency: number;
   /** Linear API-ключ (read issues). Пусто = SPEC-режим без критериев приёмки. */
   readonly linearApiKey?: string;
@@ -208,6 +213,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     reposCacheDir: parsed.REPOS_CACHE_DIR,
     maxDiffBytes: parsed.MAX_DIFF_BYTES,
     maxDiffLines: parsed.MAX_DIFF_LINES,
+    coverageFollowup: { runs: parsed.COVERAGE_FOLLOWUP_RUNS, batch: parsed.COVERAGE_FOLLOWUP_BATCH },
     queueConcurrency: parsed.QUEUE_CONCURRENCY,
     linearApiKey: parsed.LINEAR_API_KEY || undefined,
     linearApiUrl: parsed.LINEAR_API_URL,

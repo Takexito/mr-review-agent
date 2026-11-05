@@ -8,6 +8,10 @@ services:
     image: mr-review-agent:latest
     container_name: mr-review-agent
     restart: unless-stopped
+    # Без init PID 1 — node, он не подбирает осиротевшие процессы: каждый bwrap песочницы
+    # codex остаётся зомби и держит свой user namespace. Когда их набирается
+    # /proc/sys/user/max_user_namespaces, bwrap падает с ENOSPC и агент не может писать файлы.
+    init: true
     env_file:
       - .env
     environment:
