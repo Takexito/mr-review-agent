@@ -5,7 +5,7 @@ GitLab MR-агент на подписке **Codex** (не API). Тегаешь 
 **отвечает на вопрос** в треде. Работает под ChatGPT-подпиской (переиспользуем существующий
 сиат через `auth.json`), от CI не зависит.
 
-В примерах ниже бот назван `@codex`; тегать нужно то имя, что задано в `BOT_USERNAME`.
+В примерах ниже бот назван `@codex`; тегать нужно то имя, что задано в `engines.<движок>.bot.username` файла `service.yaml`.
 
 Самодостаточный сервис: свой `docker-compose` (бот + собственный Redis), общую инфру не трогает.
 
@@ -14,7 +14,7 @@ GitLab MR-агент на подписке **Codex** (не API). Тегаешь 
 ```
 GitLab (webhook: Note events) ──▶ POST /webhook (X-Gitlab-Token)
   └▶ Fastify: verify → parse → intent(@codex review | bugs | standards | spec | <вопрос>)
-     └▶ BullMQ (QUEUE_CONCURRENCY) ──▶ worker:
+     └▶ BullMQ (server.queueConcurrency) ──▶ worker:
           clone→worktree(SHA) + чекаут docs-repo
           → дифф (inline | agentic) → ось (src/queue/kinds/*): контекст и промпт
           → codex exec в песочнице / claude -p → разбор ответа → пост в MR
@@ -35,7 +35,7 @@ GitLab (webhook: Note events) ──▶ POST /webhook (X-Gitlab-Token)
   (задачи GitLab, спеки, Linear — равноправно); какие из них постановка, а какие упомянуты для
   связи, решает агент и показывает это в шапке заметки.
 - `@codex <вопрос>` → ответ реплаем в тот же тред.
-- Свои заметки игнорирует (анти-цикл). Проекты вне `PROJECT_ALLOWLIST` игнорирует.
+- Свои заметки игнорирует (анти-цикл). Проекты, не попавшие ни в один профиль `service.yaml`, игнорирует; в проекте отвечают только движки его профиля.
 - На смёрдженный или закрытый MR отвечает одной строкой, что ревьюить нечего. Если пока шло ревью,
   в MR появились новые коммиты, после публикации добавляет предупреждение, что часть замечаний может
   быть неактуальна.
@@ -47,7 +47,7 @@ GitLab (webhook: Note events) ──▶ POST /webhook (X-Gitlab-Token)
 
 | режим | когда | что происходит |
 |---|---|---|
-| `inline` | дифф ≤ `MAX_DIFF_BYTES` и ≤ `MAX_DIFF_LINES` | тело диффа уезжает в промпт целиком, один проход |
+| `inline` | дифф ≤ `review.maxDiffBytes` и ≤ `review.maxDiffLines` | тело диффа уезжает в промпт целиком, один проход |
 | `agentic` | больше любого из порогов | тело **не отправляется вообще**; агент получает полный `git diff --stat` и чеклист файлов и вычитывает дифф сам (`git diff base..head -- <файл>`) |
 
 В `agentic` агент обязан вернуть `reviewedFiles` / `skippedFiles`. По ним в шапке MR
@@ -58,7 +58,7 @@ GitLab (webhook: Note events) ──▶ POST /webhook (X-Gitlab-Token)
 Самоотчёту бот не доверяет на слово: на сотнях файлов агент читает выборочно, как бы
 ни был сформулирован промпт. Поэтому оси «баги» и «стандарты» после ответа сверяются с
 диффом, и непрочитанное уходит повторным прогоном той же оси — порциями по
-`COVERAGE_FOLLOWUP_BATCH` файлов, не больше `COVERAGE_FOLLOWUP_RUNS` прогонов на ось.
+`review.coverageFollowup.batch` файлов, не больше `review.coverageFollowup.runs` прогонов на ось.
 Находки дописываются к первым; что не удалось дочитать, остаётся в плашке. Ось
 «постановка» не дочитывается: её результат — чек-лист требований, а не находки по файлам.
 
@@ -133,7 +133,7 @@ GitLab (webhook: Note events) ──▶ POST /webhook (X-Gitlab-Token)
 
 Разделы идут в фиксированном порядке и между собой не ранжируются. Оси идут параллельно, поэтому по
 времени прогон короче трёх отдельных команд (на MR из 37 файлов — около 8 минут против 14), а по расходу
-подписки — как три команды плюс оркестратор. Таймаут `CODEX_TIMEOUT_MS` один на весь прогон.
+подписки — как три команды плюс оркестратор. Таймаут `engines.codex.timeoutMs` один на весь прогон.
 Для движка claude `review` пока исполняется как `bugs`.
 
 ### Известные ограничения
@@ -200,14 +200,16 @@ permitted`) и `git push` (плюс remote прописан без токена)
 - **GitLab бот-юзер** с PAT (scope `api`) — от него постятся комменты. Его username = то, что тегают (`@codex`).
   Клонирует репозитории сам бот (не агент, песочница на это не влияет), и для клона хватает
   read-only доступа: роль Reporter + scope `read_repository`. Если хочется урезать права на
-  клон — задай отдельный `GITLAB_CLONE_TOKEN`.
+  клон — задай отдельный `gitlab.cloneToken` в `service.yaml`.
 - **ChatGPT-подписка**: `auth.json` уже залогиненного Codex-аккаунта (`~/.codex/auth.json`).
 
 ## Быстрый старт
 
 ```bash
+cp service.example.yaml service.yaml
+# бот-аккаунты в engines, проекты в profiles
 cp .env.example .env
-# заполни WEBHOOK_SECRET (openssl rand -hex 32), GITLAB_TOKEN, BOT_USERNAME, PROJECT_ALLOWLIST
+# секреты, на которые ссылается service.yaml: WEBHOOK_SECRET (openssl rand -hex 32), GITLAB_TOKEN
 
 docker compose up -d --build
 
@@ -245,7 +247,8 @@ Group `acme` (или конкретный проект) → **Settings → Webho
 npm install
 npm run typecheck
 npm test
-LOG_PRETTY=true npm run dev   # нужен локальный Redis (REDIS_URL=redis://localhost:6379)
+# нужен локальный Redis (server.redisUrl: redis://localhost:6379) и свой service.yaml
+SERVICE_CONFIG=./service.yaml LOG_PRETTY=true npm run dev
 ```
 
 Проверка вебхука без GitLab:
@@ -257,15 +260,18 @@ curl -X POST localhost:8080/webhook \
   --data @test/fixtures/note.json
 ```
 
-## Переменные окружения
+## Конфигурация
 
-См. `.env.example`. Ключевые: `WEBHOOK_SECRET`, `GITLAB_TOKEN`, `BOT_USERNAME`, `PROJECT_ALLOWLIST`,
-`GITLAB_READ_TOKEN`, `CODEX_HOME`, `CODEX_MODEL`/`CODEX_REASONING`, `CODEX_TIMEOUT_MS`,
-`CODEX_ONDEMAND_LINEAR`, `MAX_DIFF_BYTES`/`MAX_DIFF_LINES`, `COVERAGE_FOLLOWUP_RUNS`/`COVERAGE_FOLLOWUP_BATCH`, `QUEUE_CONCURRENCY`, `LINEAR_API_KEY`,
-`DOCS_REPO_PROJECT`, `REDIS_URL`. Отладочная `CODEX_FAIL_LOG` (путь к файлу) в `.env` не нужна —
-её задают на один запуск.
+Настройки — в `service.yaml` (ADR 0004; шаблон с комментариями — `service.example.yaml`, путь — `SERVICE_CONFIG`):
+движки и их бот-аккаунты, пороги ревью, коннекторы, профили проектов по glob. Секреты в файле не хранятся:
+поля-токены принимают только `secret:NAME`, значение берётся из переменной окружения (`.env`). Ошибки
+конфигурации — все сразу — сервис печатает при запуске и не стартует.
 
-После правки `.env` контейнер нужно пересоздать: `docker compose up -d codex-bot`.
+В `.env` — секреты и временные переменные, которые уходят в шагах 2–3 `docs/plan/connectors-and-profiles.md`:
+`GITLAB_READ_TOKEN`, `CODEX_MCP_ENABLED`, `CODEX_ONDEMAND_LINEAR`, `LINEAR_API_*`, `DOCS_REPO_*`.
+Отладочная `CODEX_FAIL_LOG` (путь к файлу) в `.env` не нужна — её задают на один запуск.
+
+После правки `service.yaml` или `.env` контейнер нужно пересоздать: `docker compose up -d codex-bot`.
 `docker compose restart` переменные не перечитывает.
 
 ## Эксплуатация
@@ -327,7 +333,7 @@ curl -X POST localhost:8080/webhook \
     echo "Выполни: touch ./X && echo W=OK || echo W=DENIED" | codex exec --sandbox read-only -'
   # ждём W=DENIED; W=OK означает, что песочницы нет
   ```
-- `REPOS_CACHE_DIR` обязан лежать **вне TMPDIR**: в режиме `workspace-write` агенту
+- `git.cacheDir` обязан лежать **вне TMPDIR**: в режиме `workspace-write` агенту
   разрешена запись в TMPDIR, и кэш в `/tmp` стал бы для него writable. При `/data/repos`
   запись в кэш блокируется (проверено).
 - Пишущий `GITLAB_TOKEN` агенту не отдаётся никогда. Для чтения MR существует отдельный
@@ -344,7 +350,7 @@ curl -X POST localhost:8080/webhook \
 > - если такой риск неприемлем, не задавай `GITLAB_READ_TOKEN` вовсе: бот вернётся к
 >   срезу тредов в промпте (по умолчанию так и есть).
 - Токен не сохраняется в git-remote кэша (передаётся только как аргумент fetch/clone).
-  Для клона можно выдать отдельный read-only PAT (`GITLAB_CLONE_TOKEN`).
+  Для клона можно выдать отдельный read-only PAT (`gitlab.cloneToken`).
 - MCP-сервер `ctxmcp` запускается движком как дочерний процесс и получает `LINEAR_API_KEY`
   и, если задан, `GITLAB_READ_TOKEN` — пишущий `GITLAB_TOKEN` туда не передаётся. `mcp.json` пишется
   в каталог джобы с правами `0600` и удаляется вместе с ним. Используется

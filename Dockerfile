@@ -11,8 +11,7 @@ RUN npm run build
 FROM node:20-bookworm-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production \
-    CODEX_HOME=/data/codex \
-    REPOS_CACHE_DIR=/data/repos
+    CODEX_HOME=/data/codex
 # git — для клонов/worktree; codex + claude — CLI-агенты (обе под подпиской).
 # bubblewrap — то, чем codex РЕАЛЬНО делает песочницу на Linux. Без него он ругается
 # «could not find bubblewrap on PATH», падает на встроенный fallback, и sandbox

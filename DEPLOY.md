@@ -4,7 +4,7 @@
 столько, сколько включён ноутбук и не завис Docker Desktop.
 
 Сервис к переезду готов по конструкции — bind-mount'ов с хоста нет, всё состояние в трёх
-named volumes, GitLab публичный (`gitlab.com`). Переносить нужно три вещи: код, `.env` и
+named volumes, GitLab публичный (`gitlab.com`). Переносить нужно четыре вещи: код, `service.yaml`, `.env` и
 подписочный `auth.json`. Плюс туннель, который живёт вне Docker.
 
 ## Что переезжает, а что нет
@@ -13,6 +13,7 @@ named volumes, GitLab публичный (`gitlab.com`). Переносить н
 |---|---|---|
 | **`auth.json`** — OAuth-сессия ChatGPT (`auth_mode: chatgpt`) | volume `codex-home` | Переносим. Самая хрупкая часть, см. «Грабли» |
 | **`.env`** — `GITLAB_TOKEN`, `GITLAB_READ_TOKEN`, `LINEAR_API_KEY`, `WEBHOOK_SECRET` | рабочая копия, вне git | Копируем `scp`, не через git |
+| **`service.yaml`** — движки, бот-аккаунты, профили проектов; секретов нет | рабочая копия, вне git | Уезжает с `rsync` вместе с кодом |
 | **Креды cloudflared** — `<tunnel-uuid>.json` | `~/.cloudflared/` | Копируем. Hostname при этом **сохраняется** |
 | **Код** | локальный git-репозиторий без remote | `rsync` (см. «Открытое») |
 | `repos-cache` — bare-клоны, ~135 МБ | volume | **Не переносим**, склонируется заново при первой джобе |
@@ -37,7 +38,7 @@ named volumes, GitLab публичный (`gitlab.com`). Переносить н
 
   Если вывода нет или ошибка — этот VPS не подходит, дальше можно не читать.
 
-- **2+ vCPU, 4 ГБ RAM** (комфортно — 8 ГБ). При `QUEUE_CONCURRENCY=2` параллельно крутятся
+- **2+ vCPU, 4 ГБ RAM** (комфортно — 8 ГБ). При `server.queueConcurrency: 2` параллельно крутятся
   два `codex exec`, каждый со своим worktree и выкладкой доки.
 - **~30 ГБ диска.** Образ 1.23 ГБ + build-кэш + `codex-home` (уже 0.5 ГБ: сессии, логи,
   sqlite-стейт) + кэш клонов, который растёт.
@@ -135,7 +136,7 @@ systemctl status cloudflared
 контейнер (`docker compose up -d codex-bot`), чтобы увидеть новый статус сразу.
 
 Проверка без следов в MR — сухой прогон (см. README, «Сухой прогон»). Боевая — тегнуть бота
-в любом MR из `PROJECT_ALLOWLIST` и посмотреть, что в логах пройдёт полный цикл
+в любом MR проекта из профилей `service.yaml` и посмотреть, что в логах пройдёт полный цикл
 `job queued → job started → diff ready → job done`. Первая джоба
 будет заметно дольше обычного: bare-кэш пустой, репозиторий клонируется с нуля.
 
@@ -192,7 +193,7 @@ rsync -av --exclude node_modules --exclude dist --exclude .env ./ vps:/opt/mr-re
 ssh vps 'cd /opt/mr-review-agent && docker compose up -d --build'
 ```
 
-**Что бэкапить.** Практически — только `.env` и креды туннеля, оба статичные. `auth.json`
+**Что бэкапить.** Практически — только `.env`, `service.yaml` и креды туннеля, все статичные. `auth.json`
 бэкапу не поддаётся (см. «Грабли»), `repos-cache` и `redis-data` расходные, образ
 воспроизводится из исходников.
 

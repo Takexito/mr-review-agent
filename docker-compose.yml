@@ -15,9 +15,7 @@ services:
     env_file:
       - .env
     environment:
-      REDIS_URL: redis://redis:6379
-      CODEX_HOME: /data/codex
-      REPOS_CACHE_DIR: /data/repos
+      SERVICE_CONFIG: /config/service.yaml
     # Песочница codex на Linux делается bubblewrap, а тому нужны непривилегированные
     # user namespaces, которые дефолтный seccomp-профиль Docker запрещает. Без этого
     # bwrap падает («No permissions to create new namespace»), и codex либо выполняет
@@ -31,6 +29,7 @@ services:
       # Слушаем только на localhost — наружу отдаём через туннель/прокси.
       - "127.0.0.1:8080:8080"
     volumes:
+      - ./service.yaml:/config/service.yaml:ro  # шаблон — service.example.yaml
       - codex-home:/data/codex   # сюда кладём auth.json переиспользованного сиата
       - repos-cache:/data/repos  # bare-кэш клонов
     depends_on:

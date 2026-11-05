@@ -8,7 +8,7 @@ import { KeyedMutex } from '../util/keyedMutex.js';
 
 /**
  * Один bare-кэш на репозиторий, и джоб может быть несколько одновременно
- * (`QUEUE_CONCURRENCY`). Все операции над кэшем сериализуем по его пути.
+ * (`server.queueConcurrency`). Все операции над кэшем сериализуем по его пути.
  */
 const cacheLock = new KeyedMutex();
 

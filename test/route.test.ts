@@ -69,3 +69,14 @@ describe('route: мульти-движок по хендлу', () => {
     expect(route(evt({ noteBody: '@codex_bot review' }), onlyCodex)?.engine).toBe('codex');
   });
 });
+
+describe('route: движки профиля', () => {
+  it('should ignore a mention of a bot outside the profile engines', () => {
+    expect(route(evt({ noteBody: '@claude_bot review' }), BINDINGS, ['codex'])).toBeNull();
+  });
+
+  it('should still ignore notes by a bot outside the profile engines', () => {
+    const note = evt({ authorUsername: 'claude_bot', noteBody: '@codex_bot review' });
+    expect(route(note, BINDINGS, ['codex'])).toBeNull();
+  });
+});

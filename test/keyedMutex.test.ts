@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { KeyedMutex } from '../src/util/keyedMutex.js';
 
 /**
- * Мьютекс появился вместе с `QUEUE_CONCURRENCY=2`: параллельные `git fetch` в один
+ * Мьютекс появился вместе с параллельными джобами (`server.queueConcurrency: 2`): параллельные `git fetch` в один
  * bare-кэш ловят `cannot lock ref`. Проверяем именно сериализацию по ключу.
  */
 

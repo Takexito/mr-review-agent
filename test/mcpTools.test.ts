@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { loadConfig, type AppConfig } from '../src/config.js';
+import { loadLinearEnv, type LinearConfig } from '../src/config.js';
 import { linearGetIssue, linearSearchIssues } from '../src/mcp/tools.js';
 import { collectMentions, docFileName } from '../src/linear/materialize.js';
 
@@ -11,11 +11,8 @@ import { collectMentions, docFileName } from '../src/linear/materialize.js';
 const fetchMock = vi.fn();
 vi.stubGlobal('fetch', fetchMock);
 
-function config(over: Record<string, string> = {}): AppConfig {
-  return loadConfig({
-    WEBHOOK_SECRET: 's',
-    GITLAB_TOKEN: 't',
-    BOT_USERNAME: 'codex',
+function config(over: Record<string, string> = {}): LinearConfig {
+  return loadLinearEnv({
     LINEAR_API_KEY: 'lin_key',
     ...over,
   } as NodeJS.ProcessEnv);

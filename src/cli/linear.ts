@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { loadConfig } from '../config.js';
+import { loadLinearEnv } from '../config.js';
 import { linearGetIssue, linearSearchIssues } from '../mcp/tools.js';
 
 /**
@@ -23,17 +23,6 @@ function usage(): string {
   ].join('\n');
 }
 
-// loadConfig требует переменных бота, которых у CLI нет и быть не должно:
-// из конфига здесь нужны только поля Linear.
-function loadCliConfig(): ReturnType<typeof loadConfig> {
-  return loadConfig({
-    ...process.env,
-    WEBHOOK_SECRET: process.env['WEBHOOK_SECRET'] ?? 'cli-unused',
-    GITLAB_TOKEN: process.env['GITLAB_TOKEN'] ?? 'cli-unused',
-    BOT_USERNAME: process.env['BOT_USERNAME'] ?? 'cli-unused',
-  });
-}
-
 async function main(): Promise<number> {
   const [command, ...rest] = process.argv.slice(2);
   if (!command || command === '--help' || command === '-h') {
@@ -41,7 +30,7 @@ async function main(): Promise<number> {
     return command ? 0 : 1;
   }
 
-  const config = loadCliConfig();
+  const config = loadLinearEnv();
 
   if (command === 'issue') {
     const result = await linearGetIssue(config, rest[0]);

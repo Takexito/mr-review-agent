@@ -1,4 +1,4 @@
-import type { AppConfig } from '../config.js';
+import type { LinearConfig } from '../config.js';
 import { LinearError, searchLinearIssues, fetchLinearIssue, type LinearIssue } from '../linear/client.js';
 import { formatIssue } from '../linear/requirements.js';
 import { tmpdir } from 'node:os';
@@ -65,7 +65,7 @@ function renderIssue(issue: LinearIssue): string {
   return parts.join('\n');
 }
 
-export async function linearGetIssue(config: AppConfig, key: unknown): Promise<ToolResult> {
+export async function linearGetIssue(config: LinearConfig, key: unknown): Promise<ToolResult> {
   if (typeof key !== 'string' || key.trim().length === 0) {
     return fail('Параметр "key" обязателен, например "PRJ-137".');
   }
@@ -146,7 +146,7 @@ export async function gitlabFetchUrl(env: NodeJS.ProcessEnv, url: unknown): Prom
 }
 
 export async function linearSearchIssues(
-  config: AppConfig,
+  config: LinearConfig,
   query: unknown,
   limit: unknown,
 ): Promise<ToolResult> {

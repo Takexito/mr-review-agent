@@ -1,5 +1,5 @@
 import Fastify from 'fastify';
-import { isProjectAllowed, loadConfig, type EngineName } from './config.js';
+import { loadConfig, resolveProfile, type EngineName } from './config.js';
 import { createLogger } from './logger.js';
 import { isValidWebhookToken } from './webhook/verify.js';
 import { parseNoteHook } from './webhook/parse.js';
@@ -136,12 +136,13 @@ async function main(): Promise<void> {
     }
     const event = parsed.event;
 
-    if (!isProjectAllowed(config, event.projectPath)) {
-      log.info({ project: event.projectPath }, 'webhook: ignored (not in allowlist)');
-      return reply.code(200).send({ ignored: true, reason: `project ${event.projectPath} not in allowlist` });
+    const profile = resolveProfile(config, event.projectPath);
+    if (!profile) {
+      log.info({ project: event.projectPath }, 'webhook: ignored (no project profile)');
+      return reply.code(200).send({ ignored: true, reason: `project ${event.projectPath} matches no profile` });
     }
 
-    const routed = route(event, config.bindings);
+    const routed = route(event, config.bindings, profile.engines);
     if (!routed) {
       log.info({ mr: event.mrIid }, 'webhook: ignored (no bot mention / own note)');
       return reply.code(200).send({ ignored: true, reason: 'no bot mention or own note' });
@@ -164,7 +165,7 @@ async function main(): Promise<void> {
     const jobId = `${event.projectId}-${event.mrIid}-${event.noteId}`;
     await queue.add(intent.kind, jobData, { jobId });
     log.info(
-      { jobId, project: event.projectPath, mr: event.mrIid, kind: intent.kind, engine: routed.engine },
+      { jobId, project: event.projectPath, profile: profile.name, mr: event.mrIid, kind: intent.kind, engine: routed.engine },
       'job queued',
     );
 

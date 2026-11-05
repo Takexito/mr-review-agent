@@ -115,7 +115,7 @@ export function coverageWarning(coverage: DiffCoverage | undefined): string[] {
   lines.push(
     ...binaryNote,
     '> Отсутствие замечаний ниже относится только к просмотренной части и **не означает, что MR чист**.',
-    '> Ревью большого MR стоит либо разбить на части, либо поднять `COVERAGE_FOLLOWUP_RUNS`.',
+    '> Ревью большого MR стоит либо разбить на части, либо поднять `review.coverageFollowup.runs` в `service.yaml`.',
   );
   return lines;
 }

@@ -2,7 +2,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
-import { loadConfig } from '../config.js';
+import { loadLinearEnv } from '../config.js';
 import {
   gitlabFetchUrl,
   gitlabMrInfo,
@@ -23,17 +23,6 @@ import {
  * Отдельная точка входа: `dist/mcp/server.js`, поднимается движком, не сервером.
  */
 
-// loadConfig требует WEBHOOK_SECRET/GITLAB_TOKEN/BOT_USERNAME, которых у MCP-процесса нет
-// и быть не должно. Подставляем заглушки: из конфига здесь нужны только поля Linear.
-function loadMcpConfig(): ReturnType<typeof loadConfig> {
-  return loadConfig({
-    ...process.env,
-    WEBHOOK_SECRET: process.env['WEBHOOK_SECRET'] ?? 'mcp-unused',
-    GITLAB_TOKEN: process.env['GITLAB_TOKEN'] ?? 'mcp-unused',
-    BOT_USERNAME: process.env['BOT_USERNAME'] ?? 'mcp-unused',
-  });
-}
-
 function toContent(result: ToolResult): {
   content: { type: 'text'; text: string }[];
   isError: boolean;
@@ -42,7 +31,7 @@ function toContent(result: ToolResult): {
 }
 
 async function main(): Promise<void> {
-  const config = loadMcpConfig();
+  const config = loadLinearEnv();
   const server = new McpServer({ name: 'ctxmcp', version: '1.0.0' });
 
   server.registerTool(

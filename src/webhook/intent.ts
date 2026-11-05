@@ -91,13 +91,19 @@ function classify(after: string): Exclude<Intent, { kind: 'IGNORE' }> {
 /**
  * Маршрутизация вебхука по набору бот-биндингов (мульти-движок):
  *  - заметка от ЛЮБОГО бота → null (анти-цикл: не реагируем на свои/чужие бот-комменты);
- *  - первый биндинг, чей @handle упомянут → { engine, handle, intent };
+ *  - первый биндинг из `engines`, чей @handle упомянут → { engine, handle, intent };
  *  - никого не упомянули → null.
+ * Анти-цикл смотрит на ВСЕ биндинги, а не только на `engines`: иначе бот, не обслуживающий
+ * проект, тегнув другого бота в своей заметке, запустит переписку ботов.
  */
-export function route(event: ParsedNoteEvent, bindings: readonly EngineBinding[]): Route | null {
+export function route(
+  event: ParsedNoteEvent,
+  bindings: readonly EngineBinding[],
+  engines: readonly EngineName[] = bindings.map((b) => b.engine),
+): Route | null {
   const author = event.authorUsername.toLowerCase();
   if (bindings.some((b) => b.handle.toLowerCase() === author)) return null;
-  for (const b of bindings) {
+  for (const b of bindings.filter((x) => engines.includes(x.engine))) {
     const after = extractAfterMention(event.noteBody, b.handle);
     if (after !== null) {
       return { engine: b.engine, handle: b.handle, intent: classify(after) };

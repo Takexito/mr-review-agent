@@ -134,7 +134,7 @@ export async function runCodex(prompt: string, options: RunCodexOptions): Promis
   //
   // Что при этом становится доступно на запись: workspace (worktree джобы) и весь TMPDIR.
   // Проверено, что bare-кэш при продовой раскладке защищён (`Operation not permitted`), —
-  // но ровно потому, что `REPOS_CACHE_DIR=/data/repos` лежит ВНЕ TMPDIR. Если увести кэш
+  // но ровно потому, что `git.cacheDir: /data/repos` лежит ВНЕ TMPDIR. Если увести кэш
   // в /tmp, агент получит запись в общий кэш всех проектов. Это условие держит
   // безопасность режима, поэтому его нельзя нарушать бездумно.
   const args = config.codexOndemandLinear

@@ -6,3 +6,4 @@ dist
 data
 *.log
 test
+service.yaml

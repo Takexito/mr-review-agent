@@ -1,0 +1,64 @@
+# Настройки сервиса (ADR 0004). Путь — переменная SERVICE_CONFIG, по умолчанию /config/service.yaml.
+# Секреты здесь не хранятся: поля-токены принимают только ссылку secret:NAME на переменную окружения
+# (.env), открытый текст — ошибка запуска. Неизвестный ключ — тоже ошибка: опечатка не пройдёт молча.
+
+server:
+  port: 8080
+  logLevel: info
+  # Секрет, который GitLab шлёт в X-Gitlab-Token. Сгенерируй: openssl rand -hex 32
+  webhookSecret: secret:WEBHOOK_SECRET
+  redisUrl: redis://redis:6379
+  # Сиат подписки общий с живым разработчиком — при учащении rate-limit откатывай в 1.
+  queueConcurrency: 2
+
+gitlab:
+  host: https://gitlab.com
+  # Необязательно: токен только для clone/fetch (read_repository). Пусто = токен бота codex.
+  # cloneToken: secret:GITLAB_CLONE_TOKEN
+
+git:
+  # Держи кэш вне TMPDIR: в workspace-write песочница агента пишет в TMPDIR.
+  cacheDir: /data/repos
+
+review:
+  # Порог переключения inline → agentic (не размер усечения).
+  maxDiffBytes: 400000
+  maxDiffLines: 20000
+  # Дочитывание пропущенных агентом файлов: прогонов на ось (0 — выкл.) и файлов в прогоне.
+  coverageFollowup: { runs: 5, batch: 40 }
+
+engines:
+  codex:
+    # Бот-аккаунт: username — то, что тегают (@codex); token — PAT со scope api.
+    bot: { username: codex, token: secret:GITLAB_TOKEN }
+    home: /data/codex
+    # model: gpt-5
+    # reasoning: high
+  # Секция есть — движок включён.
+  # claude:
+  #   bot: { username: claude_bot, token: secret:CLAUDE_GITLAB_TOKEN }
+  #   # Годовой OAuth-токен подписки: `claude setup-token`.
+  #   oauthToken: secret:CLAUDE_CODE_OAUTH_TOKEN
+  #   model: sonnet
+
+# Готовые MCP-серверы. Пока только проверяются, к движкам не подключаются.
+# Ровно одно из command (stdio) или url (http). Токены в env/headers — только через secret:NAME.
+connectors: {}
+#  linear:
+#    command: npx
+#    args: [-y, some-linear-mcp]
+#    env: { LINEAR_API_KEY: secret:LINEAR_READ_KEY }
+#    tools: [get_issue, search_issues]
+#    hint: Задачи Linear по ключу PRJ-123
+
+# Профили проектов: glob по path_with_namespace (* — внутри сегмента, ** — любые сегменты).
+# Побеждает первый совпавший; проект без профиля бот игнорирует.
+profiles:
+  - name: acme
+    projects: [acme/android-app]
+    # Какие боты отвечают в проекте. Пусто = все настроенные движки.
+    # engines: [codex]
+    # connectors: [linear]
+    # Сеть у самого агента: по умолчанию выкл.; cliTools — только вместе с ней.
+    # agentNetwork: false
+    # cliTools: [glab]

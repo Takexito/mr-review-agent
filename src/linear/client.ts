@@ -1,4 +1,4 @@
-import type { AppConfig } from '../config.js';
+import type { LinearConfig } from '../config.js';
 
 /** Сбой обращения к Linear API (нет ключа, HTTP-ошибка, GraphQL-ошибка). */
 export class LinearError extends Error {
@@ -66,7 +66,7 @@ const SEARCH_QUERY = `query SearchIssues($term: String!, $first: Int!) {
 
 /** Один POST в Linear GraphQL с общей обработкой сетевых и GraphQL-ошибок. */
 async function graphql(
-  config: AppConfig,
+  config: LinearConfig,
   query: string,
   variables: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
@@ -125,7 +125,7 @@ function toIssue(node: Record<string, unknown>): LinearIssue {
  * Возвращает null, если формат ключа неверен или задача не найдена.
  * Кидает LinearError на отсутствие ключа / сетевую / GraphQL-ошибку.
  */
-export async function fetchLinearIssue(config: AppConfig, key: string): Promise<LinearIssue | null> {
+export async function fetchLinearIssue(config: LinearConfig, key: string): Promise<LinearIssue | null> {
   const parts = splitIssueKey(key);
   if (!parts) return null;
 
@@ -138,7 +138,7 @@ export async function fetchLinearIssue(config: AppConfig, key: string): Promise<
 
 /** Полнотекстовый поиск по задачам — чтобы агент мог найти смежную постановку сам. */
 export async function searchLinearIssues(
-  config: AppConfig,
+  config: LinearConfig,
   term: string,
   limit = 10,
 ): Promise<LinearIssue[]> {
