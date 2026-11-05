@@ -9,6 +9,7 @@ import { createClaudeAgent } from '../agent/claude.js';
 import { createGitlab, type GitlabClient } from '../gitlab/client.js';
 import { createProcessor } from '../queue/processor.js';
 import type { JobData, JobKind } from '../queue/job.js';
+import { redactSecrets } from '../util/redact.js';
 
 /**
  * Сухой прогон оси на реальном MR: весь путь джобы, но вместо публикации в GitLab —
@@ -99,6 +100,6 @@ async function main(): Promise<number> {
 main()
   .then((code) => process.exit(code))
   .catch((error) => {
-    process.stderr.write(`Сухой прогон упал: ${String(error)}\n`);
+    process.stderr.write(`Сухой прогон упал: ${redactSecrets(String(error))}\n`);
     process.exit(1);
   });

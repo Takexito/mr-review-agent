@@ -23,7 +23,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 COPY package.json ./
 RUN npm install --omit=dev \
-    && npm install -g @openai/codex @anthropic-ai/claude-code \
+    && npm install -g @openai/codex@0.166.0 @anthropic-ai/claude-code \
     && npm cache clean --force
 COPY --from=build /app/dist ./dist
 RUN mkdir -p /data/codex /data/repos

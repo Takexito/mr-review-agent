@@ -12,6 +12,7 @@ import { createClaudeAgent } from './agent/claude.js';
 import type { Agent } from './agent/types.js';
 import { cached, checkCodexAuth, checkClaudeAuth, checkGitlabToken, probeCodexSession, type AuthHealth } from './health.js';
 import { createGitlabWithToken, type GitlabClient } from './gitlab/client.js';
+import { redactSecrets } from './util/redact.js';
 import type { JobData } from './queue/job.js';
 
 const CODEX_PROBE_TTL_MS = 5 * 60_000;
@@ -57,7 +58,9 @@ async function main(): Promise<void> {
   );
 
   worker.on('failed', (job, err) => {
-    log.error({ jobId: job?.id, err: err.message }, 'job failed');
+    // Страховка поверх `gitWithToken`: любой путь, донёсший токен в текст ошибки, не дойдёт до MR.
+    const message = redactSecrets(err.message);
+    log.error({ jobId: job?.id, err: message }, 'job failed');
     if (!job) return;
     const attempts = job.opts.attempts ?? 1;
     if (job.attemptsMade < attempts) return; // ещё будут ретраи — не спамим
@@ -68,7 +71,7 @@ async function main(): Promise<void> {
     // понятную инструкцию вместо дампа. Тип берём по name (устойчиво к сериализации BullMQ).
     const isAuth = isAuthError(err);
     // Кап на всякий случай — в MR не должен попадать длинный дамп.
-    const reason = err.message.length > 300 ? `${err.message.slice(0, 300)}…` : err.message;
+    const reason = message.length > 300 ? `${message.slice(0, 300)}…` : message;
     void client.MergeRequestNotes.create(d.projectId, d.mrIid, failureNote(d.engine, isAuth, reason)).catch(
       () => undefined,
     );

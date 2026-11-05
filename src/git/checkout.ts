@@ -1,4 +1,5 @@
 import { execa } from 'execa';
+import { redactSecrets } from '../util/redact.js';
 import { mkdtemp, mkdir, rm, access } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -37,6 +38,18 @@ function tokenizedUrl(config: AppConfig, projectPath: string): string {
 function tokenlessUrl(config: AppConfig, projectPath: string): string {
   const host = hostname(config.gitlabHost);
   return `https://${host}/${projectPath}.git`;
+}
+
+/** git-команда с токеном в аргументах: её ошибка не должна нести токен дальше. */
+async function gitWithToken(args: readonly string[]): Promise<void> {
+  try {
+    await execa('git', args);
+  } catch (error) {
+    const stderr = (error as { stderr?: unknown }).stderr;
+    const detail = typeof stderr === 'string' && stderr.trim() ? `: ${stderr.trim()}` : '';
+    const command = args.includes('clone') ? 'clone' : 'fetch';
+    throw new Error(redactSecrets(`git ${command} failed${detail}`));
+  }
 }
 
 async function exists(path: string): Promise<boolean> {
@@ -100,20 +113,20 @@ export async function ensureBareCache(
     }
 
     if (await exists(join(dir, 'HEAD'))) {
-      await execa('git', ['-C', dir, 'fetch', '--prune', '--quiet', withToken, ...refspecs]);
+      await gitWithToken(['-C', dir, 'fetch', '--prune', '--quiet', withToken, ...refspecs]);
     } else {
       await rm(dir, { recursive: true, force: true });
-      await execa('git', ['clone', '--bare', '--quiet', withToken, dir]);
+      await gitWithToken(['clone', '--bare', '--quiet', withToken, dir]);
       await execa('git', ['-C', dir, 'remote', 'set-url', 'origin', withoutToken]);
       if (refspecs.length > 1) {
-        await execa('git', ['-C', dir, 'fetch', '--quiet', withToken, ...refspecs.slice(1)]);
+        await gitWithToken(['-C', dir, 'fetch', '--quiet', withToken, ...refspecs.slice(1)]);
       }
     }
 
     for (const sha of options.requireShas ?? []) {
       if (await hasCommit(dir, sha)) continue;
       // Последняя попытка: точечный fetch по SHA (GitLab разрешает при allowReachableSHA1InWant).
-      await execa('git', ['-C', dir, 'fetch', '--quiet', withToken, sha]).catch(() => undefined);
+      await gitWithToken(['-C', dir, 'fetch', '--quiet', withToken, sha]).catch(() => undefined);
       if (!(await hasCommit(dir, sha))) throw new MissingRevisionError(sha);
     }
 
