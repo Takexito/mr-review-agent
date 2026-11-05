@@ -136,10 +136,13 @@ export async function runCodex(prompt: string, options: RunCodexOptions): Promis
     if (error instanceof ExecaError) {
       const stderr = String(error.stderr ?? '');
       const stdout = String(error.stdout ?? '');
+      // `shortMessage` execa повторяет командную строку, а в ней `-c mcp_servers…` с токенами
+      // коннекторов; текст ошибки уходит в лог и в заметку MR.
+      const exitSummary = `codex завершился с кодом ${error.exitCode ?? '?'}`;
       const failLog = process.env['CODEX_FAIL_LOG'];
-      if (failLog) await writeFile(failLog, `${error.shortMessage}\n\n${stderr}`, 'utf8').catch(() => undefined);
+      if (failLog) await writeFile(failLog, `${exitSummary}\n\n${stderr}`, 'utf8').catch(() => undefined);
       const errors = codexErrorLines(stderr);
-      const haystack = `${errors}\n${error.shortMessage}`;
+      const haystack = errors;
       // Порядок важен: auth (401) отличаем от rate-limit — у них разные инструкции.
       if (looksAuthInvalid(haystack)) {
         throw new CodexAuthError('Codex subscription token invalidated (401)');
@@ -150,7 +153,7 @@ export async function runCodex(prompt: string, options: RunCodexOptions): Promis
       if (error.timedOut) {
         throw new CodexRunError('таймаут выполнения codex');
       }
-      throw new CodexRunError(conciseCodexError(errors, '', error.shortMessage));
+      throw new CodexRunError(conciseCodexError(errors, '', exitSummary));
     }
     throw new CodexRunError(conciseCodexError('', '', String(error)));
   }

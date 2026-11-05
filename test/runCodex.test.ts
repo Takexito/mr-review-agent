@@ -175,3 +175,23 @@ describe('runCodex: коннекторы', () => {
     expect(args).not.toContain('--dangerously-bypass-approvals-and-sandbox');
   });
 });
+
+describe('runCodex: сбой не раскрывает токены коннекторов', () => {
+  it('не включает командную строку с -c mcp_servers в текст ошибки', async () => {
+    const { ExecaError } = await import('execa');
+    const failure = Object.assign(new (ExecaError as unknown as new (m: string) => Error)('failed'), {
+      shortMessage: 'Command failed with exit code 1: codex exec -c mcp_servers.linear={env={"T"="lin_secret"}} -',
+      stderr: '',
+      stdout: '',
+      exitCode: 1,
+      timedOut: false,
+    });
+    mockedExeca.mockRejectedValueOnce(failure);
+
+    const error = await runCodex('p', { cwd: '/tmp/wt', config, access: { ...NO_ACCESS, connectors: [linear] } }).catch(
+      (e: unknown) => e as Error,
+    );
+    expect(String(error)).not.toContain('lin_secret');
+    expect(String(error)).toContain('1');
+  });
+});
