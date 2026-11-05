@@ -52,7 +52,7 @@ describe('extractSpecRefs', () => {
 
 describe('gatherSpecSources', () => {
   const ctx = {
-    config: { gitlabHost: HOST, gitlabToken: 'bot', gitlabReadToken: 'read' } as AppConfig,
+    config: { gitlabHost: HOST, gitlabToken: 'bot' } as AppConfig,
     projectId: 7,
     downloadDir: '/tmp/unused',
     log: { warn: () => undefined } as unknown as Logger,

@@ -19,11 +19,9 @@ export interface KindContext {
   readonly diffInput: DiffPromptInput;
   readonly jobDir: string;
   readonly worktree: string;
-  /** Куда складываются бинарные вложения GitLab; существует, только если задан read-токен. */
+  /** Куда предзагрузка постановки складывает бинарные вложения GitLab. */
   readonly downloadDir: string;
   readonly existingThreads: string;
-  /** Агент может дочитать Linear сам (MCP у claude / shell-CLI у codex). */
-  readonly ondemand: boolean;
   /** Ось дописывает сюда свои подсказки и пометки — массивы общие с прологом. */
   readonly contextHints: string[];
   readonly degraded: string[];

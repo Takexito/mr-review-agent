@@ -11,8 +11,8 @@ vi.mock('execa', () => {
 });
 
 import { execa } from 'execa';
-import { mcpOverride, runCodex } from '../src/codex/run.js';
-import type { McpServerSpec } from '../src/agent/types.js';
+import { runCodex } from '../src/codex/run.js';
+import type { AgentAccess, NamedConnector } from '../src/connectors/engineConfig.js';
 import type { AppConfig } from '../src/config.js';
 
 const config = {
@@ -22,6 +22,12 @@ const config = {
   codexTimeoutMs: 600_000,
   linearApiUrl: 'https://api.linear.app/graphql',
 } as AppConfig;
+
+const NO_ACCESS: AgentAccess = { connectors: [], agentNetwork: false, cliTools: [] };
+const linear: NamedConnector = {
+  name: 'linear',
+  config: { command: 'npx', args: ['-y', 'mcp-linear'], env: { LINEAR_API_TOKEN: 'lin_secret' }, headers: {} },
+};
 
 const mockedExeca = vi.mocked(execa);
 
@@ -125,110 +131,47 @@ describe('runCodex: окружение по allowlist', () => {
     expect(opts.extendEnv).toBe(false);
   });
 
-  it('отдаёт агенту read-токен GitLab, но НИКОГДА пишущий', async () => {
-    await runCodex('p', {
-      cwd: '/tmp/wt',
-      config: {
-        ...config,
-        codexOndemandLinear: true,
-        gitlabReadToken: 'glpat-readonly',
-        gitlabToken: 'glpat-write',
-        gitlabHost: 'https://gitlab.com',
-      },
-      mrContext: { projectId: 42, mrIid: 7 },
-    });
-
-    const env = envOf(0);
-    expect(env.GITLAB_READ_TOKEN).toBe('glpat-readonly');
-    expect(env.GITLAB_PROJECT_ID).toBe('42');
-    expect(env.GITLAB_MR_IID).toBe('7');
-    // Пишущий токен не должен просочиться ни под каким именем.
-    expect(Object.values(env)).not.toContain('glpat-write');
-  });
-
-  it('не отдаёт read-токен, когда контекста MR нет', async () => {
-    await runCodex('p', {
-      cwd: '/tmp/wt',
-      config: { ...config, codexOndemandLinear: true, gitlabReadToken: 'glpat-readonly' },
-    });
-
-    expect(envOf(0).GITLAB_READ_TOKEN).toBeUndefined();
-  });
-
-  it('даёт ключ Linear только когда включён on-demand CLI', async () => {
-    await runCodex('p', { cwd: '/tmp/wt', config: { ...config, linearApiKey: 'lin_secret' } });
-    expect(envOf(0).LINEAR_API_KEY).toBeUndefined();
-
-    await runCodex('p', {
-      cwd: '/tmp/wt',
-      config: { ...config, linearApiKey: 'lin_secret', codexOndemandLinear: true },
-    });
-    expect(envOf(1).LINEAR_API_KEY).toBe('lin_secret');
+  it('не кладёт секреты коннекторов в окружение агента: они уходят в MCP-процесс', async () => {
+    await runCodex('p', { cwd: '/tmp/wt', config, access: { ...NO_ACCESS, connectors: [linear] } });
+    expect(Object.values(envOf(0))).not.toContain('lin_secret');
   });
 });
 
-/**
- * Сеть codex доступна только в workspace-write: под read-only DNS не резолвится
- * (проверено — curl отдаёт exit 6). Поэтому on-demand Linear и режим песочницы связаны.
- */
-describe('runCodex: песочница под on-demand', () => {
-  it('остаётся read-only, пока on-demand выключен', async () => {
-    await runCodex('p', { cwd: '/tmp/wt', config });
+describe('runCodex: песочница', () => {
+  it('остаётся read-only без сети, когда сеть профилем не открыта', async () => {
+    await runCodex('p', { cwd: '/tmp/wt', config, access: { ...NO_ACCESS, connectors: [linear] } });
 
     const [, args] = mockedExeca.mock.calls[0] as unknown as [string, readonly string[]];
     expect(args).toContain('read-only');
     expect(args.join(' ')).not.toContain('network_access');
   });
 
-  it('переходит в workspace-write с сетью, когда on-demand включён', async () => {
-    await runCodex('p', { cwd: '/tmp/wt', config: { ...config, codexOndemandLinear: true } });
+  it('переходит в workspace-write с сетью, когда профиль открыл agentNetwork', async () => {
+    await runCodex('p', { cwd: '/tmp/wt', config, access: { ...NO_ACCESS, agentNetwork: true } });
 
     const [, args] = mockedExeca.mock.calls[0] as unknown as [string, readonly string[]];
     expect(args).toContain('workspace-write');
     expect(args).toContain('sandbox_workspace_write.network_access=true');
-    // Полное снятие песочницы недопустимо ни при каких флагах.
     expect(args).not.toContain('--dangerously-bypass-approvals-and-sandbox');
+  });
+
+  it('даёт запись без сети, когда прогону нужна запись в каталог джобы', async () => {
+    await runCodex('p', { cwd: '/tmp/wt', config, needsWrite: true });
+
+    const [, args] = mockedExeca.mock.calls[0] as unknown as [string, readonly string[]];
+    expect(args).toContain('workspace-write');
+    expect(args.join(' ')).not.toContain('network_access');
   });
 });
 
-/**
- * `codex exec` регистрирует MCP-сервер через `-c`, но авто-отклоняет каждый tools/call
- * под песочницей (проверено на 0.145.0 и 0.147.0). Поэтому по умолчанию MCP к codex не
- * подключается — код готов и ждёт флага, а Linear ему раскладывается на диск.
- */
-describe('runCodex: MCP за флагом', () => {
-  const mcp: McpServerSpec = {
-    name: 'ctxmcp',
-    command: '/usr/bin/node',
-    args: ['/app/dist/mcp/server.js'],
-    env: { LINEAR_API_KEY: 'lin_secret' },
-  };
-
-  it('не подключает MCP, пока CODEX_MCP_ENABLED не выставлен', async () => {
-    await runCodex('p', { cwd: '/tmp/wt', config, mcp });
+describe('runCodex: коннекторы', () => {
+  it('регистрирует каждый коннектор профиля через -c, не снимая песочницу', async () => {
+    await runCodex('p', { cwd: '/tmp/wt', config, access: { ...NO_ACCESS, connectors: [linear] } });
 
     const [, args] = mockedExeca.mock.calls[0] as unknown as [string, readonly string[]];
-    expect(args.join(' ')).not.toContain('mcp_servers');
-  });
-
-  it('подключает MCP, когда флаг включён', async () => {
-    await runCodex('p', { cwd: '/tmp/wt', config: { ...config, codexMcpEnabled: true }, mcp });
-
-    const [, args] = mockedExeca.mock.calls[0] as unknown as [string, readonly string[]];
-    expect(args.some((a) => a.startsWith('mcp_servers.ctxmcp='))).toBe(true);
-    // Песочница остаётся: включение MCP не должно её снимать.
-    expect(args).toContain('read-only');
+    const override = args[args.findIndex((a) => a.startsWith('mcp_servers.linear='))];
+    expect(override).toContain('default_tools_approval_mode="approve"');
+    expect(args[args.indexOf(override!) - 1]).toBe('-c');
     expect(args).not.toContain('--dangerously-bypass-approvals-and-sandbox');
-  });
-
-  it('строит валидную inline-TOML-таблицу', () => {
-    expect(mcpOverride(mcp)).toBe(
-      'mcp_servers.ctxmcp={command="/usr/bin/node",args=["/app/dist/mcp/server.js"],env={LINEAR_API_KEY="lin_secret"}}',
-    );
-  });
-
-  it('экранирует пути с кавычками и бэкслэшами', () => {
-    const tricky: McpServerSpec = { ...mcp, args: ['/a/"b"\\c.js'], env: {} };
-    expect(mcpOverride(tricky)).toContain('args=["/a/\\"b\\"\\\\c.js"]');
   });
 });

@@ -35,8 +35,7 @@ export interface FormatOptions {
 /**
  * Разбирает дискуссии GitLab в текстовые блоки: локация (file:line для inline),
  * статус resolved и реплики (author: body). Отсекает системные заметки GitLab и
- * служебный шум бота. Вынесено отдельно, потому что тот же формат нужен и для промпта
- * (обрезанный срез), и для on-demand-чтения агентом (целиком) — см. `mrContext.ts`.
+ * служебный шум бота.
  */
 export function formatDiscussions(
   discussions: readonly unknown[],
@@ -109,22 +108,15 @@ export function truncateThreads(text: string, maxChars: number, pin?: string): s
   return `${kept.join('\n\n')}\n\n…(показано ${kept.length} из ${blocks.length} тредов, ещё ${dropped} не поместились)`;
 }
 
-export interface FetchThreadsOptions {
-  /** Тред, в котором задан вопрос (ASK): помечается и закрепляется от обрезания. */
-  readonly currentDiscussionId?: string;
-}
-
-/** Существующие треды MR для промпта: собираем и обрезаем по границе тредов. */
-export async function fetchExistingThreads(
+/** Все треды MR целиком; `currentDiscussionId` — тред вопроса (ASK), он помечается. */
+export async function fetchThreads(
   api: GitlabClient,
   projectId: number,
   mrIid: number,
-  maxChars: number,
-  options: FetchThreadsOptions = {},
+  currentDiscussionId?: string,
 ): Promise<string> {
   const discussions = (await api.MergeRequestDiscussions.all(projectId, mrIid, {
     perPage: 100,
   })) as unknown[];
-  const text = formatDiscussions(discussions, { currentDiscussionId: options.currentDiscussionId });
-  return truncateThreads(text, maxChars, options.currentDiscussionId ? CURRENT_THREAD_MARK : undefined);
+  return formatDiscussions(discussions, { currentDiscussionId });
 }

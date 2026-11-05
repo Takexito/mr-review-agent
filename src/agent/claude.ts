@@ -2,7 +2,8 @@ import { execa, ExecaError } from 'execa';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { AppConfig } from '../config.js';
-import type { Agent, McpServerSpec } from './types.js';
+import type { Agent } from './types.js';
+import { claudeAllowedTools, claudeMcpConfig, NO_ACCESS, type NamedConnector } from '../connectors/engineConfig.js';
 import { AgentAuthError, AgentRateLimitError, AgentRunError } from './types.js';
 import { agentEnv } from './env.js';
 
@@ -82,18 +83,10 @@ export function extractClaudeResult(stdout: string): string {
   return typeof json.result === 'string' ? json.result : stdout;
 }
 
-/**
- * Пишет `mcp.json` для `--mcp-config`. Файл кладём в каталог джобы (его сносит processor)
- * и закрываем правами: внутри лежит `LINEAR_API_KEY`.
- */
-async function writeMcpConfig(jobDir: string, mcp: McpServerSpec): Promise<string> {
+/** `mcp.json` для `--mcp-config` в каталоге джобы (его сносит processor); внутри токены коннекторов. */
+async function writeMcpConfig(jobDir: string, connectors: readonly NamedConnector[]): Promise<string> {
   const path = join(jobDir, 'mcp.json');
-  const body = {
-    mcpServers: {
-      [mcp.name]: { command: mcp.command, args: [...mcp.args], env: { ...mcp.env } },
-    },
-  };
-  await writeFile(path, JSON.stringify(body, null, 2), { encoding: 'utf8', mode: 0o600 });
+  await writeFile(path, JSON.stringify(claudeMcpConfig(connectors), null, 2), { encoding: 'utf8', mode: 0o600 });
   return path;
 }
 
@@ -104,14 +97,14 @@ async function writeMcpConfig(jobDir: string, mcp: McpServerSpec): Promise<strin
  * Промпт — через stdin (`input`), НЕ argv: большой промпт в argv → E2BIG на execve.
  * GitLab/Anthropic-ключ в окружение claude не прокидываем (форсим OAuth-подписку).
  *
- * `--add-dir` открывает Read/Grep соседние каталоги (чекаут доки, раскладка Linear) —
+ * `--add-dir` открывает Read/Grep соседние каталоги (чекаут доки, файлы MR) —
  * без него они вне досягаемости, даже когда лежат рядом с worktree.
  * `--strict-mcp-config` — чтобы в прогон не подмешался MCP из настроек хоста.
  */
 export function createClaudeAgent(config: AppConfig): Agent {
   return {
     name: 'claude',
-    run: async (prompt, { cwd, jobDir, readDirs, mcp }) => {
+    run: async (prompt, { cwd, jobDir, readDirs, access }) => {
       const args = [
         '--print',
         '--output-format',
@@ -119,12 +112,12 @@ export function createClaudeAgent(config: AppConfig): Agent {
         '--permission-mode',
         config.claudePermissionMode,
         '--allowedTools',
-        config.claudeAllowedTools,
+        claudeAllowedTools(config.claudeAllowedTools, access ?? NO_ACCESS).join(','),
       ];
       if (config.claudeModel) args.push('--model', config.claudeModel);
       for (const dir of readDirs ?? []) args.push('--add-dir', dir);
-      if (mcp) {
-        args.push('--mcp-config', await writeMcpConfig(jobDir, mcp), '--strict-mcp-config');
+      if (access && access.connectors.length > 0) {
+        args.push('--mcp-config', await writeMcpConfig(jobDir, access.connectors), '--strict-mcp-config');
       }
 
       try {
@@ -134,8 +127,8 @@ export function createClaudeAgent(config: AppConfig): Agent {
           // Промпт через stdin (подтверждено: `claude -p` читает stdin как промпт).
           // execa пишет `input` и закрывает stdin (EOF) → claude не виснет и нет E2BIG.
           input: prompt,
-          // Явный allowlist вместо `...process.env`: GitLab-токен, webhook-секрет и ключ
-          // Linear в окружение claude не попадают (Linear он получает через MCP-процесс).
+          // Явный allowlist вместо `...process.env`: токены ботов и коннекторов в окружение
+          // claude не попадают — коннекторы получают свои через mcp.json.
           env: agentEnv(process.env, { CLAUDE_CODE_OAUTH_TOKEN: config.claudeOauthToken }),
           extendEnv: false,
         });

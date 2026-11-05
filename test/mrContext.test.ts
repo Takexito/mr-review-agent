@@ -1,12 +1,11 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { CURRENT_THREAD_MARK, formatDiscussions, truncateThreads } from '../src/gitlab/discussions.js';
 import { buildAskPrompt } from '../src/codex/prompts.js';
-import { describeError, mrContextFromEnv } from '../src/mcp/tools.js';
 
 /**
  * Треды MR раньше уходили в промпт срезом на 20 000 символов, обрезанным ПОСЕРЕДИНЕ
  * реплики, и добрать остальное агент не мог никак. Теперь срез режется по границе
- * тредов и честно говорит, сколько не поместилось, а остальное читается on-demand.
+ * тредов и честно говорит, сколько не поместилось, а остальное лежит файлом `mr/threads.md`.
  */
 
 const DISCUSSIONS = [
@@ -188,74 +187,5 @@ describe('ASK-промпт и контекст треда', () => {
 
     expect(prompt).toContain('Вопрос: q');
     expect(prompt).not.toContain('ОБСУЖДЕНИЯ В ЭТОМ MR');
-  });
-});
-
-describe('mrContextFromEnv', () => {
-  beforeEach(() => {
-    vi.unstubAllEnvs();
-  });
-
-  it('should build context when token and ids are present', () => {
-    const ctx = mrContextFromEnv({
-      GITLAB_READ_TOKEN: 'glpat-read',
-      GITLAB_HOST: 'https://gitlab.example.com',
-      GITLAB_PROJECT_ID: '42',
-      GITLAB_MR_IID: '7',
-    });
-
-    expect(ctx).toEqual({
-      host: 'https://gitlab.example.com',
-      token: 'glpat-read',
-      projectId: 42,
-      mrIid: 7,
-    });
-  });
-
-  it('should return null when the read token is absent', () => {
-    expect(mrContextFromEnv({ GITLAB_PROJECT_ID: '1', GITLAB_MR_IID: '2' })).toBeNull();
-  });
-
-  it('should return null when ids are missing or unparsable', () => {
-    expect(mrContextFromEnv({ GITLAB_READ_TOKEN: 't', GITLAB_MR_IID: '2' })).toBeNull();
-    expect(
-      mrContextFromEnv({ GITLAB_READ_TOKEN: 't', GITLAB_PROJECT_ID: 'abc', GITLAB_MR_IID: '2' }),
-    ).toBeNull();
-  });
-
-  it('should default the host when it is not provided', () => {
-    const ctx = mrContextFromEnv({ GITLAB_READ_TOKEN: 't', GITLAB_PROJECT_ID: '1', GITLAB_MR_IID: '2' });
-
-    expect(ctx?.host).toBe('https://gitlab.com');
-  });
-});
-
-/**
- * Агент должен по тексту ошибки понимать, что делать дальше. `GitbeakerRequestError`
- * (его `message` пуст, полезное лежит в `cause.description`) этого не даёт.
- */
-describe('describeError', () => {
-  it('should surface the gitbeaker description instead of the empty message', () => {
-    const err = Object.assign(new Error(''), {
-      name: 'GitbeakerRequestError',
-      cause: { description: '401 Unauthorized', response: { status: 401 } },
-    });
-
-    expect(describeError(err)).toBe('401 Unauthorized');
-  });
-
-  it('should fall back to the status when there is no description', () => {
-    const err = Object.assign(new Error(''), { cause: { response: { status: 404 } } });
-
-    expect(describeError(err)).toBe('HTTP 404');
-  });
-
-  it('should use the plain message for ordinary errors', () => {
-    expect(describeError(new Error('getaddrinfo ENOTFOUND'))).toBe('getaddrinfo ENOTFOUND');
-  });
-
-  it('should never return an empty string', () => {
-    expect(describeError(Object.assign(new Error(''), { name: 'WeirdError' }))).toBe('WeirdError');
-    expect(describeError(undefined).length).toBeGreaterThan(0);
   });
 });

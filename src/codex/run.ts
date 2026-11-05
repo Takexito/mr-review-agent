@@ -1,7 +1,8 @@
 import { writeFile } from 'node:fs/promises';
 import { execa, ExecaError } from 'execa';
 import type { AppConfig } from '../config.js';
-import { AgentAuthError, AgentRateLimitError, AgentRunError, type McpServerSpec } from '../agent/types.js';
+import { AgentAuthError, AgentRateLimitError, AgentRunError } from '../agent/types.js';
+import { codexMcpOverrides, type AgentAccess } from '../connectors/engineConfig.js';
 import { agentEnv } from '../agent/env.js';
 
 /** Codex упёрся в лимит подписки — такие джобы НЕ ретраим. Наследник общего Agent*Error. */
@@ -90,60 +91,29 @@ export function conciseCodexError(stderr: string, stdout: string, shortMessage: 
 export interface RunCodexOptions {
   readonly cwd: string;
   readonly config: AppConfig;
-  readonly mcp?: McpServerSpec;
-  /** Запись в TMPDIR (каталог джобы) нужна и без on-demand Linear. Сеть при этом не открывается. */
+  readonly access?: AgentAccess;
+  /** Запись в каталог джобы (оркестратор). Сеть при этом не открывается. */
   readonly needsWrite?: boolean;
-  /** Какой MR читают shell-CLI. Пусто — чтение MR агенту недоступно. */
-  readonly mrContext?: { readonly projectId: number; readonly mrIid: number; readonly downloadDir?: string };
-}
-
-/** Строка в TOML basic-form. JSON-экранирование совпадает с TOML для всего, что тут бывает. */
-function tomlString(value: string): string {
-  return JSON.stringify(value);
 }
 
 /**
- * Inline-таблица `mcp_servers.<name>` для `-c`. Значение `-c` парсится как TOML,
- * поэтому сервер регистрируется без правки пользовательского `config.toml`.
- */
-export function mcpOverride(mcp: McpServerSpec): string {
-  const args = mcp.args.map(tomlString).join(',');
-  const env = Object.entries(mcp.env)
-    .map(([k, v]) => `${k}=${tomlString(v)}`)
-    .join(',');
-  return `mcp_servers.${mcp.name}={command=${tomlString(mcp.command)},args=[${args}],env={${env}}}`;
-}
-
-/**
- * Запускает `codex exec` в read-only-песочнице под подпиской (CODEX_HOME → auth.json).
- * Возвращает stdout. GitLab-токен НЕ прокидываем в окружение Codex.
- *
- * MCP подключается только если явно включён (`CODEX_MCP_ENABLED`). По умолчанию выключено:
- * `codex exec` регистрирует сервер, но каждый `tools/call` авто-отклоняет
- * («user cancelled MCP tool call») — проверено на 0.145.0 и 0.147.0, не лечится ни
- * `default_tools_approval_mode`, ни per-tool `approval_mode`, ни `approval_policy`,
- * ни объявлением в `config.toml`. Проходит только
- * `--dangerously-bypass-approvals-and-sandbox`, то есть ценой снятия песочницы.
- * Поэтому Linear для codex раскладывается на диск (см. `linear/materialize.ts`).
+ * Запускает `codex exec` под подпиской (CODEX_HOME → auth.json) и возвращает stdout.
+ * Коннекторы ходят в сеть из своих MCP-процессов, поэтому песочница остаётся `read-only`,
+ * пока профиль не открыл сеть самому агенту. Токены ботов в окружение codex не попадают.
  */
 export async function runCodex(prompt: string, options: RunCodexOptions): Promise<string> {
-  const { cwd, config, mcp, mrContext, needsWrite } = options;
+  const { cwd, config, access, needsWrite } = options;
 
-  // On-demand Linear требует сети, а её codex даёт только в workspace-write
-  // (в read-only DNS не резолвится — curl отдаёт exit 6).
-  //
-  // Что при этом становится доступно на запись: workspace (worktree джобы) и весь TMPDIR.
-  // Проверено, что bare-кэш при продовой раскладке защищён (`Operation not permitted`), —
-  // но ровно потому, что `git.cacheDir: /data/repos` лежит ВНЕ TMPDIR. Если увести кэш
-  // в /tmp, агент получит запись в общий кэш всех проектов. Это условие держит
-  // безопасность режима, поэтому его нельзя нарушать бездумно.
-  const args = config.codexOndemandLinear
+  // Сеть codex даёт только в workspace-write (в read-only DNS не резолвится — curl отдаёт exit 6).
+  // Запись при этом открыта в worktree и весь TMPDIR: `git.cacheDir` вне TMPDIR, иначе агент
+  // получит запись в общий кэш репозиториев всех проектов.
+  const args = access?.agentNetwork
     ? ['exec', '--sandbox', 'workspace-write', '-c', 'sandbox_workspace_write.network_access=true']
     : ['exec', '--sandbox', needsWrite ? 'workspace-write' : 'read-only'];
 
   if (config.codexModel) args.push('-m', config.codexModel);
   if (config.codexReasoning) args.push('-c', `model_reasoning_effort=${config.codexReasoning}`);
-  if (mcp && config.codexMcpEnabled) args.push('-c', mcpOverride(mcp));
+  for (const override of codexMcpOverrides(access?.connectors ?? [])) args.push('-c', override);
   // Промпт передаём через stdin (`-`), а не позиционным argv: большие SPEC/REVIEW-промпты
   // (дифф + требования + docs-repo) превышают MAX_ARG_STRLEN (128 КБ) и падают с E2BIG на execve.
   args.push('-');
@@ -157,26 +127,7 @@ export async function runCodex(prompt: string, options: RunCodexOptions): Promis
       input: prompt,
       // Явный allowlist вместо `...process.env`: GitLab-токен и webhook-секрет в окружение
       // агента не попадают. Критично именно теперь, когда у него может быть сеть.
-      env: agentEnv(process.env, {
-        CODEX_HOME: config.codexHome,
-        // Нужны shell-CLI (`linear`, `gitlab`); сам codex эти переменные не использует.
-        // GITLAB_READ_TOKEN — read_api и только он: пишущий GITLAB_TOKEN сюда не попадает.
-        ...(config.codexOndemandLinear
-          ? {
-              LINEAR_API_KEY: config.linearApiKey,
-              LINEAR_API_URL: config.linearApiUrl,
-              ...(mrContext && config.gitlabReadToken
-                ? {
-                    GITLAB_READ_TOKEN: config.gitlabReadToken,
-                    GITLAB_HOST: config.gitlabHost,
-                    GITLAB_PROJECT_ID: String(mrContext.projectId),
-                    GITLAB_MR_IID: String(mrContext.mrIid),
-                    GITLAB_DOWNLOAD_DIR: mrContext.downloadDir,
-                  }
-                : {}),
-            }
-          : {}),
-      }),
+      env: agentEnv(process.env, { CODEX_HOME: config.codexHome }),
       // execa не должен наследовать окружение поверх нашего allowlist.
       extendEnv: false,
     });

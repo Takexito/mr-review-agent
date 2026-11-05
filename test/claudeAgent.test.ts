@@ -17,17 +17,17 @@ import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createClaudeAgent, extractClaudeResult } from '../src/agent/claude.js';
-import { AgentRunError, type McpServerSpec } from '../src/agent/types.js';
+import { AgentRunError } from '../src/agent/types.js';
 import type { AppConfig } from '../src/config.js';
 
 const config = {
   claudeBin: 'claude',
   claudeModel: 'sonnet',
   claudePermissionMode: 'dontAsk',
-  claudeAllowedTools: 'Read,Glob,Grep,Bash(git diff *)',
+  claudeAllowedTools: ['Read', 'Glob', 'Grep', 'Bash(git diff *)'],
   claudeTimeoutMs: 900_000,
   claudeOauthToken: 'tok-xxx',
-} as AppConfig;
+} as unknown as AppConfig;
 
 const mockedExeca = vi.mocked(execa);
 
@@ -90,7 +90,6 @@ describe('createClaudeAgent.run: read-only, промпт через stdin', () =
       const env = opts.env as Record<string, unknown>;
       expect(env.GITLAB_TOKEN).toBeUndefined();
       expect(env.WEBHOOK_SECRET).toBeUndefined();
-      // Linear claude получает через MCP-процесс, а не напрямую.
       expect(env.LINEAR_API_KEY).toBeUndefined();
       expect(env.PATH).toBe(process.env.PATH);
       expect(opts.extendEnv).toBe(false);
@@ -110,7 +109,7 @@ describe('createClaudeAgent.run: read-only, промпт через stdin', () =
 });
 
 /**
- * Read/Grep у claude ограничены cwd — соседний чекаут доки и раскладка Linear видны
+ * Read/Grep у claude ограничены cwd — соседний чекаут доки и файлы MR видны
  * только через `--add-dir` (проверено вживую). MCP-конфиг несёт LINEAR_API_KEY,
  * поэтому файл обязан быть закрыт по правам.
  */
@@ -139,25 +138,29 @@ describe('createClaudeAgent.run: доступ к контексту вне cwd',
     expect(args).toContain(join(jobDir, 'linear'));
   });
 
-  it('пишет mcp.json с правами 600 и включает строгий режим', async () => {
-    const mcp: McpServerSpec = {
-      name: 'ctxmcp',
-      command: '/usr/bin/node',
-      args: ['/app/dist/mcp/server.js'],
-      env: { LINEAR_API_KEY: 'lin_secret' },
-    };
+  it('пишет mcp.json коннекторов с правами 600, включает строгий режим и разрешает их инструменты', async () => {
     const agent = createClaudeAgent(config);
-    await agent.run('p', { cwd: join(jobDir, 'repo'), jobDir, mcp });
+    await agent.run('p', {
+      cwd: join(jobDir, 'repo'),
+      jobDir,
+      access: {
+        connectors: [
+          { name: 'linear', config: { command: 'npx', args: [], env: { LINEAR_API_TOKEN: 'lin_secret' }, headers: {} } },
+        ],
+        agentNetwork: false,
+        cliTools: [],
+      },
+    });
 
     const args = mockedExeca.mock.calls[0]![1] as unknown as string[];
     expect(args).toContain('--strict-mcp-config');
+    expect(args[args.indexOf('--allowedTools') + 1]).toBe('Read,Glob,Grep,Bash(git diff *),mcp__linear');
     const path = args[args.indexOf('--mcp-config') + 1]!;
 
     const written = JSON.parse(await readFile(path, 'utf8'));
-    expect(written.mcpServers.ctxmcp.command).toBe('/usr/bin/node');
-    expect(written.mcpServers.ctxmcp.env.LINEAR_API_KEY).toBe('lin_secret');
+    expect(written.mcpServers.linear.env.LINEAR_API_TOKEN).toBe('lin_secret');
 
-    // В файле лежит ключ Linear — он не должен быть читаем кому попало.
+    // В файле лежат токены коннекторов.
     const mode = (await stat(path)).mode & 0o777;
     expect(mode).toBe(0o600);
   });

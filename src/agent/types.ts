@@ -1,4 +1,5 @@
 import type { EngineName } from '../config.js';
+import type { AgentAccess } from '../connectors/engineConfig.js';
 
 /**
  * Абстракция движка ревью. Инкапсулирует запуск CLI-агента под подпиской
@@ -11,34 +12,20 @@ export interface Agent {
   run(prompt: string, options: RunOptions): Promise<string>;
 }
 
-/**
- * stdio-MCP-сервер, который движок должен поднять на время прогона.
- * Описываем структурно, а не готовой строкой: claude ждёт JSON-файл, codex — TOML в `-c`.
- */
-export interface McpServerSpec {
-  readonly name: string;
-  readonly command: string;
-  readonly args: readonly string[];
-  /** Только то, что движку правда нужно. GITLAB_TOKEN сюда не попадает никогда. */
-  readonly env: Readonly<Record<string, string>>;
-}
-
 export interface RunOptions {
   /** Рабочая директория агента — worktree с кодом MR. */
   readonly cwd: string;
   /** Каталог джобы (родитель cwd): туда пишутся временные файлы вроде mcp.json. */
   readonly jobDir: string;
   /**
-   * Каталоги вне cwd, которые агент должен уметь читать (чекаут доки, раскладка Linear).
+   * Каталоги вне cwd, которые агент должен уметь читать (чекаут доки, файлы MR).
    * codex читает их и так; claude — только через `--add-dir`.
    */
   readonly readDirs?: readonly string[];
   /** Прогону нужна запись в каталог джобы — codex поднимается в `workspace-write`. */
   readonly needsWrite?: boolean;
-  /** MCP-сервер для этого прогона. Пусто — движок работает без MCP. */
-  readonly mcp?: McpServerSpec;
-  /** Какой MR читают shell-CLI движка (у codex). Пусто — чтение MR недоступно. */
-  readonly mrContext?: { readonly projectId: number; readonly mrIid: number; readonly downloadDir?: string };
+  /** Коннекторы, сеть и CLI-инструменты профиля проекта. Пусто — только чтение worktree. */
+  readonly access?: AgentAccess;
 }
 
 /**

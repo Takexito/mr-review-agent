@@ -83,7 +83,6 @@ async function main(): Promise<void> {
   const gitlabTokens = new Map<string, string>([
     ...config.bindings.map((b): [string, string] => [`${b.engine}Bot`, b.gitlabToken]),
     ['clone', config.gitlabCloneToken],
-    ...(config.gitlabReadToken ? [['read', config.gitlabReadToken] as [string, string]] : []),
   ]);
   // Один токен часто стоит сразу в нескольких ролях — в GitLab ходим по разу на значение.
   const gitlabProbes = new Map<string, () => Promise<AuthHealth>>();

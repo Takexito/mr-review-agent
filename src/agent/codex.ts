@@ -12,7 +12,6 @@ export function createCodexAgent(config: AppConfig): Agent {
     name: 'codex',
     // readDirs не передаём: под `--sandbox read-only` codex читает соседние каталоги
     // штатно, отдельного разрешения (в отличие от claude `--add-dir`) ему не нужно.
-    run: (prompt, { cwd, mcp, mrContext, needsWrite }) =>
-      runCodex(prompt, { cwd, config, mcp, mrContext, needsWrite }),
+    run: (prompt, { cwd, access, needsWrite }) => runCodex(prompt, { cwd, config, access, needsWrite }),
   };
 }

@@ -12,7 +12,7 @@ named volumes, GitLab публичный (`gitlab.com`). Переносить н
 | Что | Где сейчас | Как поступаем |
 |---|---|---|
 | **`auth.json`** — OAuth-сессия ChatGPT (`auth_mode: chatgpt`) | volume `codex-home` | Переносим. Самая хрупкая часть, см. «Грабли» |
-| **`.env`** — `GITLAB_TOKEN`, `GITLAB_READ_TOKEN`, `LINEAR_API_KEY`, `WEBHOOK_SECRET` | рабочая копия, вне git | Копируем `scp`, не через git |
+| **`.env`** — `GITLAB_TOKEN`, токены коннекторов, `LINEAR_API_KEY`, `WEBHOOK_SECRET` | рабочая копия, вне git | Копируем `scp`, не через git |
 | **`service.yaml`** — движки, бот-аккаунты, профили проектов; секретов нет | рабочая копия, вне git | Уезжает с `rsync` вместе с кодом |
 | **Креды cloudflared** — `<tunnel-uuid>.json` | `~/.cloudflared/` | Копируем. Hostname при этом **сохраняется** |
 | **Код** | локальный git-репозиторий без remote | `rsync` (см. «Открытое») |

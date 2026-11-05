@@ -4,14 +4,17 @@ export const ENGINE_NAMES = ['codex', 'claude'] as const;
 
 const SECRET_PREFIX = 'secret:';
 
+const CONNECTOR_NAME = /^[A-Za-z0-9-]+$/;
+// Значение уходит в `Bash(<tool> *)` у claude: `*` или пробел открыли бы любую команду.
+const CLI_TOOL_NAME = /^[A-Za-z0-9._-]+$/;
+
 export const DEFAULT_TIMEOUT_MS = 1_800_000;
 
 export const CLAUDE_DEFAULTS = {
   bin: 'claude',
   model: 'sonnet',
   permissionMode: 'dontAsk',
-  // `mcp__ctxmcp` — префикс сервера, разрешает все его инструменты.
-  // ls-files/blame нужны для пофайлового обхода в agentic-режиме.
+  // ls-files/blame нужны для пофайлового обхода в agentic-режиме. Коннекторы — см. `claudeAllowedTools`.
   allowedTools: [
     'Read',
     'Glob',
@@ -21,7 +24,6 @@ export const CLAUDE_DEFAULTS = {
     'Bash(git show *)',
     'Bash(git ls-files *)',
     'Bash(git blame *)',
-    'mcp__ctxmcp',
   ],
 } as const;
 
@@ -78,7 +80,7 @@ export function buildServiceSchema(env: Env) {
       engines: z.array(z.enum(ENGINE_NAMES)).min(1).optional(),
       connectors: z.array(z.string()).default([]),
       agentNetwork: z.boolean().default(false),
-      cliTools: z.array(z.string().min(1)).default([]),
+      cliTools: z.array(z.string().regex(CLI_TOOL_NAME, 'имя команды без шаблонов и пробелов')).default([]),
     })
     .strict();
 
@@ -141,7 +143,21 @@ export function buildServiceSchema(env: Env) {
             .optional(),
         })
         .strict(),
-      connectors: z.record(connector).default({}),
+      // codex делит ключ `-c mcp_servers.<имя>` по точкам, claude склеивает `mcp__<имя>__<инструмент>`.
+      connectors: z
+        .record(connector)
+        .default({})
+        .superRefine((connectors, ctx) => {
+          for (const name of Object.keys(connectors)) {
+            if (!CONNECTOR_NAME.test(name)) {
+              ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                path: [name],
+                message: 'имя коннектора — только латиница, цифры и дефис',
+              });
+            }
+          }
+        }),
       profiles: z.array(profile).min(1),
     })
     .strict()

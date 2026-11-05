@@ -134,11 +134,6 @@ export function outOfScopeSection(): string[] {
   ];
 }
 
-/**
- * Врезка «где искать контекст»: пути до чекаута доки и раскладки Linear на диске
- * либо перечень MCP-инструментов. Раньше вместо неё в промпт вклеивалось до 120 КБ
- * контрактов двумя захардкоженными файлами.
- */
 export function contextSection(hints: readonly string[] | undefined): string[] {
   if (!hints || hints.length === 0) return [];
   return ['', 'ГДЕ ИСКАТЬ КОНТЕКСТ:', ...hints.map((h) => `- ${h}`)];

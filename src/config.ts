@@ -26,21 +26,6 @@ export interface EngineBinding {
 }
 
 const TransitionalEnvSchema = z.object({
-  /**
-   * Токен, который получает АГЕНТ для чтения тредов/описания MR (scope `read_api`).
-   * Намеренно отдельный от токенов ботов: те умеют писать и агенту не отдаются никогда.
-   */
-  GITLAB_READ_TOKEN: z.string().optional(),
-  /**
-   * Подключать ли MCP к codex. Без `default_tools_approval_mode="approve"` на сервере
-   * `codex exec` отклоняет каждый tools/call под песочницей.
-   */
-  CODEX_MCP_ENABLED: z.string().optional(),
-  /**
-   * On-demand доступ codex к Linear через shell-CLI. Требует сети, а её даёт только
-   * `workspace-write` + `network_access`: агент получает запись в worktree и TMPDIR.
-   */
-  CODEX_ONDEMAND_LINEAR: z.string().optional(),
   LINEAR_API_KEY: z.string().optional(),
   LINEAR_API_URL: z.string().url().default('https://api.linear.app/graphql'),
   DOCS_REPO_PROJECT: z.string().default('acme/docs'),
@@ -48,15 +33,9 @@ const TransitionalEnvSchema = z.object({
 });
 
 export interface LinearConfig {
-  /** Linear API-ключ (read issues). Пусто = SPEC-режим без критериев приёмки. */
+  /** Ключ, которым бот скачивает постановку до запуска движка. Пусто = задачи Linear не скачиваются. */
   readonly linearApiKey?: string;
   readonly linearApiUrl: string;
-}
-
-/** Поля Linear и чтения MR — для отдельных процессов (MCP-сервер, shell-CLI), у которых нет `service.yaml`. */
-export function loadLinearEnv(env: NodeJS.ProcessEnv = process.env): LinearConfig {
-  const parsed = TransitionalEnvSchema.parse(env);
-  return { linearApiKey: parsed.LINEAR_API_KEY || undefined, linearApiUrl: parsed.LINEAR_API_URL };
 }
 
 export type { ConnectorConfig };
@@ -77,27 +56,22 @@ export interface AppConfig extends LinearConfig {
   readonly logLevel: string;
   readonly webhookSecret: string;
   readonly gitlabHost: string;
-  /** Токен бота codex: им ходит общий GitLab-клиент (dry-run, запасной токен чтения). */
+  /** Токен бота codex: им ходит общий GitLab-клиент (dry-run, предзагрузка постановки). */
   readonly gitlabToken: string;
   /** Токен для clone/fetch (может быть урезан до `read_repository`). */
   readonly gitlabCloneToken: string;
-  /** Read-only токен, отдаваемый агенту для чтения MR. Пусто = on-demand по MR недоступен. */
-  readonly gitlabReadToken?: string;
   readonly codexHome: string;
   readonly codexBin: string;
   readonly codexModel?: string;
   readonly codexReasoning?: string;
   readonly codexTimeoutMs: number;
-  readonly codexMcpEnabled: boolean;
-  /** codex ходит в Linear сам через shell-CLI; требует ослабления песочницы до workspace-write. */
-  readonly codexOndemandLinear: boolean;
   // --- Claude ---
   readonly claudeEnabled: boolean;
   readonly claudeOauthToken?: string;
   readonly claudeBin: string;
   readonly claudeModel?: string;
   readonly claudePermissionMode: string;
-  readonly claudeAllowedTools: string;
+  readonly claudeAllowedTools: readonly string[];
   readonly claudeTimeoutMs: number;
   /** Бот-аккаунты настроенных движков, в порядке `engines` файла. */
   readonly bindings: readonly EngineBinding[];
@@ -115,14 +89,6 @@ export interface AppConfig extends LinearConfig {
   readonly connectors: Readonly<Record<string, ConnectorConfig>>;
   /** Порядок важен: побеждает первый совпавший, см. `resolveProfile`. */
   readonly profiles: readonly ProjectProfile[];
-}
-
-/** Мягкий парс булева env: 'false'/'0'/'no'/'off' → false, всё прочее непустое → true. */
-function parseBoolLoose(raw: string | undefined): boolean | undefined {
-  if (raw === undefined) return undefined;
-  const v = raw.trim().toLowerCase();
-  if (v === '') return undefined;
-  return !['false', '0', 'no', 'off'].includes(v);
 }
 
 export class ConfigError extends Error {
@@ -153,7 +119,6 @@ export function parseServiceConfig(yamlText: string, env: NodeJS.ProcessEnv): Ap
   }
   const legacy = legacyResult.data;
   const { codex, claude } = file.engines;
-  const linearApiKey = legacy.LINEAR_API_KEY || undefined;
 
   const bindings: EngineBinding[] = [{ engine: 'codex', handle: codex.bot.username, gitlabToken: codex.bot.token }];
   if (claude) bindings.push({ engine: 'claude', handle: claude.bot.username, gitlabToken: claude.bot.token });
@@ -168,28 +133,24 @@ export function parseServiceConfig(yamlText: string, env: NodeJS.ProcessEnv): Ap
     gitlabHost: file.gitlab.host,
     gitlabToken: codex.bot.token,
     gitlabCloneToken: file.gitlab.cloneToken ?? codex.bot.token,
-    gitlabReadToken: legacy.GITLAB_READ_TOKEN || undefined,
     codexHome: codex.home,
     codexBin: codex.bin,
     codexModel: codex.model,
     codexReasoning: codex.reasoning,
     codexTimeoutMs: codex.timeoutMs,
-    codexMcpEnabled: parseBoolLoose(legacy.CODEX_MCP_ENABLED) ?? false,
-    // Без ключа CLI нечего звать, и ослаблять песочницу незачем.
-    codexOndemandLinear: (parseBoolLoose(legacy.CODEX_ONDEMAND_LINEAR) ?? true) && !!linearApiKey,
     claudeEnabled: !!claude,
     claudeOauthToken: claude?.oauthToken,
     claudeBin: claude?.bin ?? CLAUDE_DEFAULTS.bin,
     claudeModel: claude?.model,
     claudePermissionMode: claude?.permissionMode ?? CLAUDE_DEFAULTS.permissionMode,
-    claudeAllowedTools: (claude?.allowedTools ?? CLAUDE_DEFAULTS.allowedTools).join(','),
+    claudeAllowedTools: claude?.allowedTools ?? CLAUDE_DEFAULTS.allowedTools,
     claudeTimeoutMs: claude?.timeoutMs ?? DEFAULT_TIMEOUT_MS,
     bindings,
     reposCacheDir: file.git.cacheDir,
     maxDiffBytes: file.review.maxDiffBytes,
     maxDiffLines: file.review.maxDiffLines,
     coverageFollowup: file.review.coverageFollowup,
-    linearApiKey,
+    linearApiKey: legacy.LINEAR_API_KEY || undefined,
     linearApiUrl: legacy.LINEAR_API_URL,
     docsRepoProject: legacy.DOCS_REPO_PROJECT,
     docsRepoRef: legacy.DOCS_REPO_REF,

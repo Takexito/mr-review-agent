@@ -41,15 +41,26 @@ engines:
   #   oauthToken: secret:CLAUDE_CODE_OAUTH_TOKEN
   #   model: sonnet
 
-# Готовые MCP-серверы. Пока только проверяются, к движкам не подключаются.
-# Ровно одно из command (stdio) или url (http). Токены в env/headers — только через secret:NAME.
+# Готовые MCP-серверы (ADR 0002). Имя — латиница, цифры, дефис. Ровно одно из command (stdio)
+# или url (http); токены в env/headers — через secret:NAME и только на чтение: запрет записи
+# держит сама система, а tools лишь сужает выдачу агенту (без tools открыт весь сервер).
+# hint попадает в промпт. Коннектор доступен проекту, только если его перечисляет профиль.
 connectors: {}
+#  gitlab:
+#    command: npx
+#    args: [-y, "@zereight/mcp-gitlab"]
+#    env:
+#      GITLAB_PERSONAL_ACCESS_TOKEN: secret:GITLAB_MCP_TOKEN
+#      GITLAB_API_URL: https://gitlab.com/api/v4
+#      GITLAB_PERMISSION_MODE: readonly
+#    tools: [get_merge_request, mr_discussions, get_issue, list_issue_links, get_file_contents, download_attachment]
+#    hint: Задачи (#34), чужие MR (!12), файлы и вложения GitLab по ссылкам из требований и тредов.
 #  linear:
 #    command: npx
-#    args: [-y, some-linear-mcp]
-#    env: { LINEAR_API_KEY: secret:LINEAR_READ_KEY }
-#    tools: [get_issue, search_issues]
-#    hint: Задачи Linear по ключу PRJ-123
+#    args: [-y, "@tacticlaunch/mcp-linear"]
+#    env: { LINEAR_API_TOKEN: secret:LINEAR_MCP_TOKEN }
+#    tools: [linear_getIssueById, linear_searchIssues, linear_getIssueDocuments]
+#    hint: Задачи Linear по ключу вида PRJ-137 и их документы.
 
 # Профили проектов: glob по path_with_namespace (* — внутри сегмента, ** — любые сегменты).
 # Побеждает первый совпавший; проект без профиля бот игнорирует.

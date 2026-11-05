@@ -1,11 +1,12 @@
-import { mkdir } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Job } from 'bullmq';
 import type { JobData } from './job.js';
-import type { AppConfig, EngineName } from '../config.js';
+import { resolveProfile, type AppConfig, type EngineName } from '../config.js';
 import type { Logger } from '../logger.js';
 import type { GitlabClient } from '../gitlab/client.js';
-import type { Agent, McpServerSpec, RunOptions } from '../agent/types.js';
+import type { Agent, RunOptions } from '../agent/types.js';
+import { NO_ACCESS, type AgentAccess } from '../connectors/engineConfig.js';
 import { AgentRateLimitError } from '../agent/types.js';
 import { fetchMrDetails, postAck, reactToNote } from '../gitlab/mr.js';
 import {
@@ -17,7 +18,7 @@ import {
   removeWorktree,
 } from '../git/checkout.js';
 import { computeDiff } from '../git/diff.js';
-import { fetchExistingThreads } from '../gitlab/discussions.js';
+import { CURRENT_THREAD_MARK, fetchThreads, truncateThreads } from '../gitlab/discussions.js';
 import { makeBlobLinker } from '../gitlab/links.js';
 import { gatherDocsRepo } from '../docs/docsRepo.js';
 import { prepareAsk } from './kinds/ask.js';
@@ -42,18 +43,6 @@ const EXISTING_THREADS_MAX = 20_000;
 /** Реакция-подтверждение «взял в работу» на заметку-триггер (gemoji-имя 👀). */
 const ACK_REACTION = 'eyes';
 
-/**
- * Команда shell-CLI для Linear, которую предлагаем codex. Путь считаем от собранного
- * модуля, а не хардкодим `/app/...`: так одинаково работает и в контейнере, и локально.
- */
-const LINEAR_CLI = `${process.execPath} ${new URL('../cli/linear.js', import.meta.url).pathname}`;
-const GITLAB_CLI = `${process.execPath} ${new URL('../cli/gitlab.js', import.meta.url).pathname}`;
-
-const GITLAB_LINKS_HINT =
-  'Ссылки на GitLab в требованиях, описаниях и тредах — полные URL и короткие `#34` / `!12` ' +
-  '(задачи, merge request-ы, файлы, картинки-вложения) ' +
-  'открывай сам: если на такой источник ссылается постановка — прочитай его обязательно, а если он не ' +
-  'открылся — прямо скажи об этом в summary/ответе.';
 
 /** Движки и GitLab-клиенты по имени движка (клиент = токен соответствующей бот-идентичности). */
 export interface ProcessorDeps {
@@ -65,31 +54,53 @@ async function bestEffort(promise: Promise<unknown>): Promise<void> {
   await promise.catch(() => undefined);
 }
 
-/**
- * Описание MCP-сервера ctxmcp. Поднимается движком как дочерний процесс, поэтому
- * в окружение кладём только `LINEAR_*` — GitLab-токен туда не попадает никогда.
- */
-function mcpSpec(config: AppConfig, data: JobData, downloadDir: string): McpServerSpec | undefined {
-  if (!config.linearApiKey && !config.gitlabReadToken) return undefined;
+/** Джоба могла встать в очередь до правки `service.yaml`, убравшей профиль, — тогда агенту ничего не открываем. */
+function agentAccess(config: AppConfig, projectPath: string): AgentAccess {
+  const profile = resolveProfile(config, projectPath);
+  if (!profile) return NO_ACCESS;
   return {
-    name: 'ctxmcp',
-    command: process.execPath,
-    args: [new URL('../mcp/server.js', import.meta.url).pathname],
-    env: {
-      LINEAR_API_URL: config.linearApiUrl,
-      ...(config.linearApiKey ? { LINEAR_API_KEY: config.linearApiKey } : {}),
-      // Read-токен уезжает в MCP-процесс, а не в окружение самого движка.
-      ...(config.gitlabReadToken
-        ? {
-            GITLAB_READ_TOKEN: config.gitlabReadToken,
-            GITLAB_HOST: config.gitlabHost,
-            GITLAB_PROJECT_ID: String(data.projectId),
-            GITLAB_MR_IID: String(data.mrIid),
-            GITLAB_DOWNLOAD_DIR: downloadDir,
-          }
-        : {}),
-    },
+    connectors: profile.connectors.map((name) => ({ name, config: config.connectors[name]! })),
+    agentNetwork: profile.agentNetwork,
+    cliTools: profile.cliTools,
   };
+}
+
+function accessHints(access: AgentAccess): string[] {
+  const hints = access.connectors.flatMap(({ name, config }) =>
+    config.hint ? [`MCP-сервер \`${name}\`: ${config.hint}`] : [],
+  );
+  if (access.cliTools.length > 0) {
+    hints.push(`Доступные CLI-инструменты: ${access.cliTools.map((t) => `\`${t}\``).join(', ')}.`);
+  }
+  return hints;
+}
+
+/** Описание и все треды MR — файлами: в промпт треды попадают срезом, а описание не попадает вовсе. */
+async function writeMrFiles(
+  api: GitlabClient,
+  data: JobData,
+  mr: { title: string; description: string },
+  jobDir: string,
+  jlog: Logger,
+): Promise<{ dir: string; excerpt: string }> {
+  const dir = join(jobDir, 'mr');
+  await mkdir(dir, { recursive: true });
+  await writeFile(join(dir, 'description.md'), `# ${mr.title}\n\n${mr.description}\n`, 'utf8');
+  // Помечаем и закрепляем от обрезания только тред самого вопроса.
+  const current = data.kind === 'ASK' ? data.discussionId : undefined;
+  let threads = '';
+  let threadsFile = '(обсуждений нет)\n';
+  try {
+    threads = await fetchThreads(api, data.projectId, data.mrIid, current);
+    if (threads) threadsFile = threads;
+  } catch (error) {
+    jlog.warn({ err: String(error) }, 'fetch discussions failed, continue without prior context');
+    // Иначе агент прочтёт «обсуждений нет» и решит, что уже поднятого в MR ничего нет.
+    threadsFile = '(обсуждения MR не загрузились — их содержимое неизвестно)\n';
+  }
+  await writeFile(join(dir, 'threads.md'), threadsFile, 'utf8');
+  const excerpt = threads ? truncateThreads(threads, EXISTING_THREADS_MAX, current ? CURRENT_THREAD_MARK : undefined) : '';
+  return { dir, excerpt };
 }
 
 /**
@@ -175,15 +186,7 @@ export function createProcessor(
     try {
       // Треды нужны всем режимам: осям ревью — для дедупа уже поднятого, ASK — чтобы
       // видеть тред, в который отвечает (реплай на собственное замечание бота).
-      let existingThreads = '';
-      try {
-        existingThreads = await fetchExistingThreads(api, data.projectId, data.mrIid, EXISTING_THREADS_MAX, {
-          // Помечаем и закрепляем от обрезания только тред самого вопроса.
-          ...(data.kind === 'ASK' && data.discussionId ? { currentDiscussionId: data.discussionId } : {}),
-        });
-      } catch (error) {
-        jlog.warn({ err: String(error) }, 'fetch discussions failed, continue without prior context');
-      }
+      const mrFiles = await writeMrFiles(api, data, mr, jobDir, jlog);
 
       // Доку выкладываем на диск для всех режимов, а не только SPEC: вопрос про контракт
       // может прийти и в ASK, и в обычном ревью.
@@ -194,51 +197,21 @@ export function createProcessor(
       const degraded: string[] = [];
       if (!docs.ok) degraded.push('docs-repo недоступен боту — без сверки API-контрактов.');
 
-      const contextHints: string[] = [];
+      const contextHints: string[] = [
+        `Описание MR и все его обсуждения целиком лежат в \`${mrFiles.dir}\` (\`description.md\`, \`threads.md\`).`,
+      ];
       if (docs.dir) {
         contextHints.push(
           `Документация и API-контракты (источник истины) выложены в \`${docs.dir}\` — grep/read по всему репозиторию доки.`,
         );
       }
 
+      const access = agentAccess(config, data.projectPath);
+      contextHints.push(...accessHints(access));
+
       // Создаём заранее: `--add-dir` у claude принимает только существующий каталог.
       const downloadDir = join(jobDir, 'gitlab-files');
-      if (config.gitlabReadToken) await mkdir(downloadDir, { recursive: true });
-      const mcp = mcpSpec(config, data, downloadDir);
-      // MCP реально работает только у claude: codex авто-отклоняет tools/call под песочницей.
-      const mcpUsable = mcp !== undefined && (agent.name === 'claude' || config.codexMcpEnabled);
-      // codex вместо MCP ходит shell-CLI — ему для этого открыта сеть.
-      const cliUsable = agent.name === 'codex' && config.codexOndemandLinear;
-
-      if (mcpUsable) {
-        if (config.linearApiKey) {
-          contextHints.push(
-            'Задачи Linear доступны инструментами `linear_get_issue` (по ключу вида PRJ-137) и `linear_search_issues`.',
-          );
-        }
-        if (config.gitlabReadToken) {
-          contextHints.push(
-            'Полное описание MR — инструмент `gitlab_mr_info`, все обсуждения целиком — `gitlab_mr_notes`.',
-            `${GITLAB_LINKS_HINT} Инструмент — \`gitlab_fetch_url\`.`,
-          );
-        }
-      } else if (cliUsable) {
-        if (config.linearApiKey) {
-          contextHints.push(
-            `Задачи Linear читаются командой \`${LINEAR_CLI} issue PRJ-137\` (описание, критерии приёмки, спеки) ` +
-              `и \`${LINEAR_CLI} search "<запрос>"\`. Зови, когда встретил ссылку на смежную задачу.`,
-          );
-        }
-        if (config.gitlabReadToken) {
-          contextHints.push(
-            `Полное описание MR — \`${GITLAB_CLI} mr-info\`, все обсуждения целиком — \`${GITLAB_CLI} mr-notes\` ` +
-              '(в промпт попадает только срез тредов).',
-            `${GITLAB_LINKS_HINT} Команда — \`${GITLAB_CLI} fetch '<url или #34>'\` (в одинарных кавычках).`,
-          );
-        }
-      }
-      // Раскладка Linear на диск нужна ровно тогда, когда дочитать самому агент не может.
-      const ondemand = (mcpUsable || cliUsable) && !!config.linearApiKey;
+      await mkdir(downloadDir, { recursive: true });
 
       // Оркестратор держится на суб-агентах codex; у остальных движков общее ревью — это поиск багов.
       const kind = data.kind === 'REVIEW' && agent.name !== 'codex' ? 'BUGS' : data.kind;
@@ -260,14 +233,13 @@ export function createProcessor(
         jobDir,
         worktree,
         downloadDir,
-        existingThreads,
-        ondemand,
+        existingThreads: mrFiles.excerpt,
         contextHints,
         degraded,
         linkify: makeBlobLinker(worktree, config.gitlabHost, data.projectPath, mr.headSha),
       });
 
-      const readDirs = [docsDir, config.gitlabReadToken ? downloadDir : null, ...(prepared.readDirs ?? [])].filter(
+      const readDirs = [docsDir, mrFiles.dir, downloadDir, ...(prepared.readDirs ?? [])].filter(
         (d): d is string => d !== null,
       );
       const runOptions: RunOptions = {
@@ -277,10 +249,7 @@ export function createProcessor(
         // claude проглатывает, но передавать его нечестно.
         readDirs,
         ...(prepared.needsWrite ? { needsWrite: true } : {}),
-        ...(mcpUsable ? { mcp } : {}),
-        ...(cliUsable && config.gitlabReadToken
-          ? { mrContext: { projectId: data.projectId, mrIid: data.mrIid, downloadDir } }
-          : {}),
+        access,
       };
 
       const runCtx = { api, projectId: data.projectId, mrIid: data.mrIid, jlog };

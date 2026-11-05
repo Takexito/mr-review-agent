@@ -127,6 +127,16 @@ describe('parseServiceConfig', () => {
     expect(errorOf(() => parseServiceConfig(neither, ENV))).toContain('connectors.x');
   });
 
+  it('should reject a connector name that cannot be a codex config key or claude tool prefix', () => {
+    const yaml = MINIMAL.replace('profiles:', 'connectors:\n  my.linear: { command: a }\nprofiles:');
+    expect(errorOf(() => parseServiceConfig(yaml, ENV))).toContain('my.linear');
+  });
+
+  it('should reject a cli tool that is a pattern rather than a command name', () => {
+    const yaml = `${MINIMAL}    agentNetwork: true\n    cliTools: ["*"]\n`;
+    expect(errorOf(() => parseServiceConfig(yaml, ENV))).toContain('cliTools');
+  });
+
   it('should reject unknown keys to catch typos', () => {
     const yaml = MINIMAL.replace('server:', 'server:\n  prot: 1');
     expect(errorOf(() => parseServiceConfig(yaml, ENV))).toContain('prot');

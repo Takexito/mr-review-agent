@@ -40,7 +40,7 @@ async function gitlabSource(ctx: GatherContext, target: string): Promise<SpecSou
   const text = await fetchGitlabUrl(
     {
       host: config.gitlabHost,
-      token: config.gitlabReadToken ?? config.gitlabToken,
+      token: config.gitlabToken,
       downloadDir: ctx.downloadDir,
       defaultProject: String(ctx.projectId),
     },

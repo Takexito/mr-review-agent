@@ -4,7 +4,6 @@ import { parseSpecOutput } from '../../codex/parseSpec.js';
 import { postRawReview } from '../../gitlab/postReview.js';
 import { postSpecReview, SPEC_HEADING } from '../../gitlab/postSpecReview.js';
 import { parseIssueKeyFromBranch } from '../../linear/requirements.js';
-import { materializeLinear } from '../../linear/materialize.js';
 import { extractSpecRefs, type SpecRef } from '../../spec/refs.js';
 import { gatherSpecSources } from '../../spec/sources.js';
 import { buildCoverage, logCoverage, type KindContext, type KindHandler } from './shared.js';
@@ -53,18 +52,6 @@ export async function prepareSpecAxis(ctx: KindContext): Promise<SpecAxis> {
   );
   degraded.push(...gathered.degraded);
 
-  // Раскладка Linear на диск нужна ровно тогда, когда дочитать самому агент не может.
-  let linearDir: string | null = null;
-  const linearKey = refs.find((r): r is Extract<SpecRef, { kind: 'linear' }> => r.kind === 'linear')?.key;
-  if (linearKey && !ctx.ondemand) {
-    linearDir = (await materializeLinear(config, ctx.jobDir, linearKey, jlog)).dir;
-    if (linearDir) {
-      contextHints.push(
-        `Требования, эпик, спеки и смежные задачи Linear выложены в \`${linearDir}\` — начни с \`INDEX.md\`.`,
-      );
-    }
-  }
-
   const prompt = buildSpecPrompt({
     ...ctx.diffInput,
     projectPath: data.projectPath,
@@ -81,7 +68,7 @@ export async function prepareSpecAxis(ctx: KindContext): Promise<SpecAxis> {
 
   return {
     prompt,
-    readDirs: linearDir ? [linearDir] : [],
+    readDirs: [],
     sources: gathered.sources.map((s) => s.label),
   };
 }
