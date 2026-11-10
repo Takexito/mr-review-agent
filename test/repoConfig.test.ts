@@ -106,10 +106,16 @@ describe('applyRepoConfig', () => {
   it('should refuse paths that leave the repository or carry git pathspec magic', () => {
     const result = applyRepoConfig('exclude: [":(top)x", "/abs"]\nstandards: [../outside.md]', profile);
     expect(result.errors).toEqual([
-      'exclude.0: путь от корня репозитория, без `:` в начале, `/` в начале и `..`',
-      'exclude.1: путь от корня репозитория, без `:` в начале, `/` в начале и `..`',
-      'standards.0: путь от корня репозитория, без `:` в начале, `/` в начале и `..`',
+      'exclude.0: путь от корня репозитория: латиница, цифры и `_.-*?[]/`, без `/` в начале и `..`',
+      'exclude.1: путь от корня репозитория: латиница, цифры и `_.-*?[]/`, без `/` в начале и `..`',
+      'standards.0: путь от корня репозитория: латиница, цифры и `_.-*?[]/`, без `/` в начале и `..`',
     ]);
+  });
+
+  it('should refuse paths with quotes, spaces or shell characters', () => {
+    const result = applyRepoConfig(`exclude: ["x'; rm -rf ~; echo '", "a b/**"]\nstandards: ["docs/$(id).md"]`, profile);
+    expect(result.errors).toHaveLength(3);
+    expect(result.errors.every((e) => e.endsWith('без `/` в начале и `..`'))).toBe(true);
   });
 
   it('should treat an empty file as no settings', () => {

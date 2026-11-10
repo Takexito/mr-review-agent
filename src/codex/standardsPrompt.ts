@@ -11,6 +11,8 @@ export interface StandardsPromptInput extends DiffPromptInput {
   readonly existingThreads?: string;
   readonly contextHints?: readonly string[];
   readonly declaredStandards?: readonly string[];
+  /** Ветка, из которой прочитан `.review.yml`: объявленные стандарты читаются оттуда же. */
+  readonly standardsBranch?: string;
 }
 
 /**
@@ -68,7 +70,7 @@ export function buildStandardsPrompt(input: StandardsPromptInput): string {
       ? [
           `Проект сам назвал своими стандартами (\`.review.yml\`): ${input.declaredStandards.map((d) => `\`${d}\``).join(', ')} — прочитай их первыми и целиком,`,
           // В worktree лежит head MR: оттуда автор MR переписал бы объявленный стандарт в том же MR.
-          `версию из target-ветки: \`git show ${input.targetBranch}:<путь>\`.`,
+          `версию из той же ветки, что и \`.review.yml\`: \`git show ${input.standardsBranch ?? input.targetBranch}:<путь>\`.`,
         ]
       : []),
     'Конфиги линтеров и форматтеров (detekt, lint, `.editorconfig`, CI) прочитай отдельно — по ним видно, что ловит инструмент.',

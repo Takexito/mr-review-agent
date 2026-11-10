@@ -2,7 +2,7 @@ import { join } from 'node:path';
 import { execa } from 'execa';
 import type { RelatedRepo } from '../config.js';
 import { SAME_BRANCH } from '../config/schema.js';
-import { addWorktreeAt, removeWorktree } from '../git/checkout.js';
+import { addWorktreeAt, defaultBranch as readDefaultBranch, removeWorktree } from '../git/checkout.js';
 import type { Logger } from '../logger.js';
 
 export interface RelatedBranches {
@@ -40,7 +40,7 @@ async function gitOut(cacheDir: string, ...args: string[]): Promise<string> {
 }
 
 async function readBranches(cacheDir: string): Promise<RelatedBranches> {
-  const defaultBranch = await gitOut(cacheDir, 'symbolic-ref', '--short', 'HEAD');
+  const defaultBranch = await readDefaultBranch(cacheDir);
   const names = new Set(
     (await gitOut(cacheDir, 'for-each-ref', '--format=%(refname:short)', 'refs/heads')).split('\n').filter(Boolean),
   );

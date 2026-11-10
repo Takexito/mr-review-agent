@@ -13,6 +13,7 @@ import { fetchMrDetails, postAck, reactToNote } from '../gitlab/mr.js';
 import {
   addWorktreeAt,
   createJobDir,
+  defaultBranch,
   ensureBareCache,
   MissingRevisionError,
   readBranchFile,
@@ -180,7 +181,8 @@ export function createProcessor(
     }
 
     const baseProfile = resolveProfile(config, data.projectPath);
-    const repo = baseProfile ? await loadRepoConfig(cacheDir, mr.targetBranch, baseProfile) : null;
+    const repoBranch = await repoConfigBranch(api, data.projectId, mr.targetBranch, cacheDir, jlog);
+    const repo = baseProfile ? await loadRepoConfig(cacheDir, repoBranch, baseProfile) : null;
     // На каждый вопрос в треде одна и та же заметка была бы шумом: хватает её у ревью.
     if (repo && repo.errors.length > 0 && data.kind !== 'ASK') {
       jlog.warn({ errors: repo.errors }, 'repository config ignored');
@@ -189,7 +191,7 @@ export function createProcessor(
           api,
           data.projectId,
           data.mrIid,
-          [`⚠️ \`${REPO_CONFIG_FILE}\` в ветке \`${mr.targetBranch}\` проигнорирован — ревью идёт по настройкам профиля:`, ...repo.errors.map((e) => `- ${e}`)].join('\n'),
+          [`⚠️ \`${REPO_CONFIG_FILE}\` в ветке \`${repoBranch}\` проигнорирован — ревью идёт по настройкам профиля:`, ...repo.errors.map((e) => `- ${e}`)].join('\n'),
         ),
       );
     }
@@ -271,7 +273,7 @@ export function createProcessor(
         jobDir,
         worktree,
         profile,
-        repo: repo ?? { exclude: [], standards: [] },
+        repo: { exclude, standards: repo?.standards ?? [], branch: repoBranch },
         openConnector: deps.openConnector ?? openConnector,
         imagesDir,
         allowedProjects,
@@ -316,6 +318,26 @@ interface RunCtx {
   readonly projectId: number;
   readonly mrIid: number;
   readonly jlog: Logger;
+}
+
+/**
+ * Target-ветку MR может создать сам автор MR и положить туда свой `.review.yml` (`exclude: ["**"]`).
+ * Поэтому она годится, только если менять её может не каждый разработчик: защищённая или по умолчанию.
+ */
+async function repoConfigBranch(
+  api: GitlabClient,
+  projectId: number,
+  targetBranch: string,
+  cacheDir: string,
+  jlog: Logger,
+): Promise<string> {
+  try {
+    const branch = (await api.Branches.show(projectId, targetBranch)) as { protected?: boolean; default?: boolean };
+    if (branch.protected || branch.default) return targetBranch;
+  } catch (error) {
+    jlog.warn({ err: String(error), branch: targetBranch }, 'target branch protection unknown, using default branch config');
+  }
+  return defaultBranch(cacheDir);
 }
 
 async function loadRepoConfig(cacheDir: string, branch: string, profile: ProjectProfile): Promise<RepoConfigResult> {

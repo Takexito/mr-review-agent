@@ -23,7 +23,8 @@ export interface KindContext {
   readonly worktree: string;
   /** После слияния с `.review.yml`; undefined — профиль убрали из `service.yaml`, пока джоба стояла в очереди. */
   readonly profile: ProjectProfile | undefined;
-  readonly repo: Pick<RepoSettings, 'exclude' | 'standards'>;
+  /** `branch` — откуда прочитан `.review.yml`, см. `repoConfigBranch`. */
+  readonly repo: Pick<RepoSettings, 'exclude' | 'standards'> & { readonly branch: string };
   /** Бот как MCP-клиент коннектора — для предзагрузки прямых целей. */
   readonly openConnector: OpenConnector;
   /** Куда бот складывает картинки из описания MR и прямых целей. */

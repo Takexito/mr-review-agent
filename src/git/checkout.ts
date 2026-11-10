@@ -63,6 +63,11 @@ async function exists(path: string): Promise<boolean> {
 
 const MAX_REPO_FILE_BYTES = 64 * 1024;
 
+/** Ветка по умолчанию — HEAD bare-кэша, который `refreshDefaultBranch` держит актуальным. */
+export async function defaultBranch(cacheDir: string): Promise<string> {
+  return (await execa('git', ['-C', cacheDir, 'symbolic-ref', '--short', 'HEAD'])).stdout.trim();
+}
+
 export class RepoFileTooLargeError extends Error {
   constructor(readonly bytes: number) {
     super(`файл ${bytes} байт — больше ${MAX_REPO_FILE_BYTES}`);

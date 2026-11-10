@@ -18,14 +18,13 @@ export interface RepoConfigResult extends RepoSettings {
   readonly errors: readonly string[];
 }
 
-// Путь уходит в git pathspec (`:(exclude,glob)<путь>`) и в промпт: `:` в начале — своя магия pathspec,
-// `/` и `..` — выход из репозитория.
+// Путь уходит в git pathspec (`:(exclude,glob)<путь>`) и в команды, которые агент копирует в shell:
+// кавычка или `$(` стали бы командой, `:` в начале — магией pathspec, `/` и `..` — выходом из репозитория.
+const PATH_RULE = 'путь от корня репозитория: латиница, цифры и `_.-*?[]/`, без `/` в начале и `..`';
 const REPO_PATH = z
   .string()
-  .min(1)
-  .refine((p) => !/^[:/]/.test(p) && !p.split('/').includes('..'), {
-    message: 'путь от корня репозитория, без `:` в начале, `/` в начале и `..`',
-  });
+  .regex(/^[A-Za-z0-9_.*?[\]-][A-Za-z0-9_.*?[\]/-]*$/, PATH_RULE)
+  .refine((p) => !p.split('/').includes('..'), PATH_RULE);
 
 const MAX_QUOTED_CHARS = 80;
 

@@ -16,6 +16,7 @@ export function standardsPrompt(ctx: KindContext): string {
     existingThreads: ctx.existingThreads,
     contextHints: ctx.contextHints,
     declaredStandards: ctx.repo.standards,
+    standardsBranch: ctx.repo.branch,
   });
 }
 
