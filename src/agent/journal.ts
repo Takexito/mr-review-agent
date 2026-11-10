@@ -17,16 +17,18 @@ export interface CodexEvents {
   readonly calls: readonly ToolCall[];
   /** Сообщения событий `error` и `turn.failed` по порядку. */
   readonly errors: readonly string[];
+  /** Из `thread.started`: на него ссылаются сессии суб-агентов, см. `subagentCalls`. */
+  readonly threadId: string | null;
 }
 
-type Json = Record<string, unknown>;
+export type Json = Record<string, unknown>;
 
-function isObject(value: unknown): value is Json {
+export function isObject(value: unknown): value is Json {
   return typeof value === 'object' && value !== null;
 }
 
 /** Событие — объект с `type`: строка `{}` в тексте ответа событием не считается. */
-function jsonEvents(stdout: string): Json[] {
+export function jsonEvents(stdout: string): Json[] {
   return stdout.split('\n').flatMap((line) => {
     if (!line.trim()) return [];
     try {
@@ -38,7 +40,7 @@ function jsonEvents(stdout: string): Json[] {
   });
 }
 
-const asString = (value: unknown): string => (typeof value === 'string' ? value : '');
+export const asString = (value: unknown): string => (typeof value === 'string' ? value : '');
 
 /**
  * Разбирает JSONL `codex exec --json`. Элемент `type: "error"` — предупреждение (устаревший ключ
@@ -46,9 +48,11 @@ const asString = (value: unknown): string => (typeof value === 'string' ? value 
  */
 export function parseCodexEvents(stdout: string): CodexEvents {
   let text = '';
+  let threadId: string | null = null;
   const calls: ToolCall[] = [];
   const errors: string[] = [];
   for (const event of jsonEvents(stdout)) {
+    if (event['type'] === 'thread.started') threadId = asString(event['thread_id']) || null;
     if (event['type'] === 'error') errors.push(asString(event['message']));
     if (event['type'] === 'turn.failed' && isObject(event['error'])) errors.push(asString(event['error']['message']));
     const item = event['item'];
@@ -63,7 +67,7 @@ export function parseCodexEvents(stdout: string): CodexEvents {
       });
     }
   }
-  return { text, calls, errors: errors.filter((e) => e.length > 0) };
+  return { text, calls, errors: errors.filter((e) => e.length > 0), threadId };
 }
 
 /** Встроенные инструменты claude именуются без префикса; у MCP — `mcp__<сервер>__<инструмент>`. */

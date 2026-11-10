@@ -13,8 +13,12 @@ vi.mock('execa', () => {
   };
 });
 
+import { mkdir, mkdtemp, rm, utimes, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { execa } from 'execa';
 import { runCodex } from '../src/codex/run.js';
+import { sessionDayDir } from '../src/codex/subagentSessions.js';
 import type { AgentAccess, NamedConnector } from '../src/connectors/engineConfig.js';
 import type { AppConfig } from '../src/config.js';
 import type { ToolCall } from '../src/agent/journal.js';
@@ -290,5 +294,88 @@ describe('runCodex: поток событий --json', () => {
     expect(error?.message).toContain('stream disconnected');
     // Упавшее дочитывание тоже открывало источники.
     expect(journal).toHaveLength(1);
+  });
+});
+
+/** Сессия codex в `$CODEX_HOME/sessions/ГГГГ/ММ/ДД` — как её пишет codex 0.166. */
+async function writeSession(home: string, id: string, parent: string | null, calls: readonly object[]): Promise<string> {
+  const dir = sessionDayDir(home, new Date());
+  await mkdir(dir, { recursive: true });
+  const meta = { type: 'session_meta', payload: { id, ...(parent ? { parent_thread_id: parent } : {}) } };
+  const items = calls.map((item) => ({ type: 'event_msg', payload: { type: 'item_completed', thread_id: id, item } }));
+  const path = join(dir, `rollout-x-${id}.jsonl`);
+  // Недописанная строка в конце: codex мог ещё сбрасывать сессию, когда родитель завершился.
+  await writeFile(path, `${[meta, ...items].map((l) => JSON.stringify(l)).join('\n')}\n{"type":"event_ms`);
+  return path;
+}
+const sessionCall = (tool: string, id: string, ok: boolean): object => ({
+  type: 'McpToolCall',
+  server: 'linear',
+  tool,
+  arguments: { id },
+  status: 'completed',
+  result: { content: [], isError: !ok },
+});
+
+describe('runCodex: вызовы суб-агентов из их сессий', () => {
+  let home: string;
+
+  beforeEach(async () => {
+    home = await mkdtemp(join(tmpdir(), 'codex-home-'));
+  });
+
+  afterEach(async () => {
+    await rm(home, { recursive: true, force: true });
+  });
+
+  it('добавляет в журнал вызовы суб-агентов любой глубины и только этого прогона', async () => {
+    await writeSession(home, 'root', null, [sessionCall('linear_getIssueById', 'ROOT-1', true)]);
+    await writeSession(home, 'child', 'root', [sessionCall('linear_getIssueById', 'OPS-219', true)]);
+    await writeSession(home, 'grandchild', 'child', [sessionCall('linear_getIssueById', 'BAD-1', false)]);
+    await writeSession(home, 'stranger', 'other-root', [sessionCall('linear_getIssueById', 'X-1', true)]);
+    // Сессия того же дерева, но давняя: id суб-агентов уникальны, так что попасть сюда она может только по ошибке фильтра.
+    const old = await writeSession(home, 'old', 'root', [sessionCall('linear_getIssueById', 'OLD-1', true)]);
+    await utimes(old, new Date(Date.now() - 3_600_000), new Date(Date.now() - 3_600_000));
+    mockedExeca.mockResolvedValueOnce({
+      stdout: events({ type: 'thread.started', thread_id: 'root' }, mcpCall('linear_getIssueById', { id: 'ROOT-1' }, 'completed'), message('OK')),
+      stderr: '',
+    } as never);
+
+    const journal: ToolCall[] = [];
+    await runCodex('p', { cwd: '/tmp/wt', config: { ...config, codexHome: home }, journal });
+
+    expect(journal).toEqual([
+      { server: 'linear', tool: 'linear_getIssueById', arguments: { id: 'ROOT-1' }, ok: true },
+      { server: 'linear', tool: 'linear_getIssueById', arguments: { id: 'OPS-219' }, ok: true },
+      { server: 'linear', tool: 'linear_getIssueById', arguments: { id: 'BAD-1' }, ok: false },
+    ]);
+  });
+
+  it('добавляет вызовы суб-агентов и упавшего прогона', async () => {
+    await writeSession(home, 'child', 'root', [sessionCall('linear_getIssueById', 'OPS-219', true)]);
+    const { ExecaError } = await import('execa');
+    const failure = Object.assign(new (ExecaError as unknown as new (m: string) => Error)('failed'), {
+      shortMessage: 'Command failed with exit code 1',
+      stderr: '',
+      stdout: events({ type: 'thread.started', thread_id: 'root' }, { type: 'turn.failed', error: { message: 'stream disconnected' } }),
+      exitCode: 1,
+      timedOut: false,
+    });
+    mockedExeca.mockRejectedValueOnce(failure);
+
+    const journal: ToolCall[] = [];
+    await runCodex('p', { cwd: '/tmp/wt', config: { ...config, codexHome: home }, journal }).catch(() => undefined);
+    expect(journal.map((c) => c.arguments)).toEqual([{ id: 'OPS-219' }]);
+  });
+
+  it('не роняет прогон, когда каталога сессий нет', async () => {
+    mockedExeca.mockResolvedValueOnce({
+      stdout: events({ type: 'thread.started', thread_id: 'root' }, message('OK')),
+      stderr: '',
+    } as never);
+
+    const journal: ToolCall[] = [];
+    expect(await runCodex('p', { cwd: '/tmp/wt', config: { ...config, codexHome: join(home, 'none') }, journal })).toBe('OK');
+    expect(journal).toEqual([]);
   });
 });

@@ -4,7 +4,8 @@ import type { AppConfig } from '../config.js';
 import { AgentAuthError, AgentRateLimitError, AgentRunError } from '../agent/types.js';
 import { cliToolsEnv, codexMcpOverrides, type AgentAccess } from '../connectors/engineConfig.js';
 import { agentEnv } from '../agent/env.js';
-import { parseCodexEvents, type ToolCall } from '../agent/journal.js';
+import { parseCodexEvents, type CodexEvents, type ToolCall } from '../agent/journal.js';
+import { subagentCalls } from './subagentSessions.js';
 
 /** Codex упёрся в лимит подписки — такие джобы НЕ ретраим. Наследник общего Agent*Error. */
 export class CodexRateLimitError extends AgentRateLimitError {
@@ -121,6 +122,12 @@ export async function runCodex(prompt: string, options: RunCodexOptions): Promis
   // (дифф + требования + треды) превышают MAX_ARG_STRLEN (128 КБ) и падают с E2BIG на execve.
   args.push('-');
 
+  const started = new Date();
+  const record = async (events: CodexEvents): Promise<void> => {
+    if (!journal) return;
+    journal.push(...events.calls);
+    if (events.threadId) journal.push(...(await subagentCalls(config.codexHome, events.threadId, started)));
+  };
   try {
     const result = await execa(config.codexBin, args, {
       cwd,
@@ -135,7 +142,7 @@ export async function runCodex(prompt: string, options: RunCodexOptions): Promis
       extendEnv: false,
     });
     const events = parseCodexEvents(result.stdout);
-    journal?.push(...events.calls);
+    await record(events);
     return events.text;
   } catch (error) {
     if (error instanceof ExecaError) {
@@ -148,7 +155,7 @@ export async function runCodex(prompt: string, options: RunCodexOptions): Promis
       // С `--json` codex сообщает о сбое событиями в stdout, а stderr оставляет пустым.
       if (failLog) await writeFile(failLog, `${exitSummary}\n\n${stderr}\n\n${stdout}`, 'utf8').catch(() => undefined);
       const events = parseCodexEvents(stdout);
-      journal?.push(...events.calls);
+      await record(events);
       // Только последнее: событием `error` codex сообщает и о промежуточных сбоях, после которых
       // переподключается, — ранний «429, retrying» сделал бы из любого сбоя лимит без ретрая.
       const reason = events.errors.at(-1);
