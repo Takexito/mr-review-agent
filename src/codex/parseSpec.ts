@@ -6,6 +6,8 @@ export const SpecStatusSchema = z.enum(['met', 'violated', 'unclear', 'na']);
 export type SpecStatus = z.infer<typeof SpecStatusSchema>;
 
 export const SpecItemSchema = z.object({
+  /** Метка прямой цели, из которой взят пункт (`PRJ-137`) — по ней бот сверяет покрытие целей. */
+  target: z.string().default(''),
   requirement: z.string().min(1),
   status: SpecStatusSchema.default('unclear'),
   evidence: z.string().default(''),
@@ -19,17 +21,10 @@ export const SpecExtraSchema = z.object({
   note: z.string().default(''),
 });
 
-/** Источник, который агент счёл контекстом, а не постановкой этого MR. */
-export const IgnoredSourceSchema = z.object({
-  source: z.string().min(1),
-  reason: z.string().default(''),
-});
-
 export const SpecReviewSchema = z.object({
   summary: z.string().default(''),
   items: z.array(SpecItemSchema).default([]),
   extras: z.array(SpecExtraSchema).default([]),
-  ignoredSources: z.array(IgnoredSourceSchema).default([]),
   // Тот же самоотчёт о покрытии, что и в REVIEW — SPEC тоже ходит по диффу сам.
   ...CoverageFieldsSchema,
 });

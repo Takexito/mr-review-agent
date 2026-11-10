@@ -20,7 +20,6 @@ const config = {
   codexHome: '/data/codex',
   codexReasoning: 'xhigh',
   codexTimeoutMs: 600_000,
-  linearApiUrl: 'https://api.linear.app/graphql',
 } as AppConfig;
 
 const NO_ACCESS: AgentAccess = { connectors: [], agentNetwork: false, cliTools: [] };

@@ -12,10 +12,15 @@ const STATUS_EMOJI: Record<SpecStatus, string> = {
 };
 
 export const SPEC_HEADING = '## 🤖 Codex · соответствие требованиям';
+export const SPEC_NOT_RUN = 'Сверка с постановкой не запускалась.';
+
+export function degradedLines(degraded: readonly string[] | undefined): string[] {
+  return degraded && degraded.length > 0 ? ['', '> ⚠️ Неполные источники:', ...degraded.map((d) => `> - ${d}`)] : [];
+}
 
 export interface PostSpecOptions {
-  /** Подписи скачанных источников требований (`#34`, `OPS-176`). */
-  readonly sources: readonly string[];
+  /** Метки скачанных прямых целей (`#34`, `PRJ-137`). */
+  readonly targets: readonly string[];
   /** Пометки о недоступных источниках — выводим под таблицей. */
   readonly degraded?: readonly string[];
   /** Путь worktree — чтобы срезать абсолютный префикс из evidence для inline-позиции. */
@@ -47,6 +52,12 @@ function evidencePosition(evidence: string, worktree: string): { path: string; l
   return { path: m[1]!, line: Number(m[2]) };
 }
 
+/** Цели, на которые не ссылается ни один пункт чек-листа. */
+export function uncoveredTargets(review: SpecReview, targets: readonly string[]): string[] {
+  const covered = new Set(review.items.map((i) => i.target.trim().toUpperCase()));
+  return targets.filter((t) => !covered.has(t.toUpperCase()));
+}
+
 export function buildSpecNote(review: SpecReview, opts: PostSpecOptions): string {
   return [SPEC_HEADING, ...specSections(review, opts)].join('\n');
 }
@@ -56,17 +67,12 @@ export function specSections(review: SpecReview, opts: PostSpecOptions): string[
   const counts: Record<SpecStatus, number> = { met: 0, violated: 0, unclear: 0, na: 0 };
   const lines: string[] = [];
 
-  // Только реально скачанные: агент заносит сюда и то, что не открылось, а это уже есть в degraded.
-  const ignored = new Map(
-    review.ignoredSources
-      .map((s): [string, string] => [s.source.trim(), s.reason.trim()])
-      .filter(([source]) => opts.sources.includes(source)),
-  );
-  const used = opts.sources.filter((s) => !ignored.has(s));
-  lines.push('', used.length > 0 ? `Постановка: ${used.map((s) => `\`${s}\``).join(', ')}.` : '_Источник постановки не найден._');
-  if (ignored.size > 0) {
-    const list = [...ignored].map(([source, reason]) => `\`${source}\`${reason ? ` (${reason})` : ''}`);
-    lines.push(`Как контекст, без сверки: ${list.join('; ')}.`);
+  lines.push('', `Постановка: ${opts.targets.map((s) => `\`${s}\``).join(', ')}.`);
+  const uncovered = uncoveredTargets(review, opts.targets);
+  if (uncovered.length > 0) {
+    lines.push(
+      `> ⚠️ По целям ${uncovered.map((s) => `\`${s}\``).join(', ')} в чек-листе нет ни одного пункта — их соответствие не проверено.`,
+    );
   }
 
   if (review.summary.trim().length > 0) {
@@ -101,9 +107,7 @@ export function specSections(review: SpecReview, opts: PostSpecOptions): string[
     }
   }
 
-  if (opts.degraded && opts.degraded.length > 0) {
-    lines.push('', '> ⚠️ Неполные источники:', ...opts.degraded.map((d) => `> - ${d}`));
-  }
+  lines.push(...degradedLines(opts.degraded));
   return lines;
 }
 

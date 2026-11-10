@@ -68,8 +68,8 @@ describe('spec-промпт: ответ автора — довод, а не п�
       diffMode: 'inline',
       diff: 'd',
       existingThreads: THREADS,
-      sources: [],
-      sourcesOrigin: 'mr',
+      targets: [],
+      targetsMode: 'inline',
     });
 
     expect(prompt).toContain('довод, а не приговор');

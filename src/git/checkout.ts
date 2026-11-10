@@ -152,7 +152,7 @@ export async function ensureBareCache(
 }
 
 /**
- * Каталог джобы. Внутри лежит `repo/` (cwd агента) и рядом — `related/`, `mr/`, `gitlab-files/`.
+ * Каталог джобы. Внутри лежит `repo/` (cwd агента) и рядом — `related/`, `mr/`, `images/`, `targets/`.
  * Соседние каталоги, а не подкаталоги репозитория: иначе они засоряют worktree и
  * вылезают в `git status`/`git diff` как untracked.
  */

@@ -34,9 +34,8 @@ const REVIEWS: AxisReviews = {
   },
   spec: {
     summary: '',
-    items: [{ requirement: 'текст', status: 'violated', evidence: 'A.kt:1', note: 'не тот текст' }],
+    items: [{ target: 'PRJ-1', requirement: 'текст', status: 'violated', evidence: 'A.kt:1', note: 'не тот текст' }],
     extras: [],
-    ignoredSources: [],
     reviewedFiles: [],
     skippedFiles: [],
   },

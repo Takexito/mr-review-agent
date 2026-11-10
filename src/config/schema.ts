@@ -7,6 +7,8 @@ const SECRET_PREFIX = 'secret:';
 const CONNECTOR_NAME = /^[A-Za-z0-9-]+$/;
 // Значение уходит в `Bash(<tool> *)` у claude: `*` или пробел открыли бы любую команду.
 const CLI_TOOL_NAME = /^[A-Za-z0-9._-]+$/;
+// Префикс ключа задачи (`PRJ` в `PRJ-137`) или `#` — задачи GitLab, см. `findDirectTargets`.
+const ISSUE_KEY_PREFIX = /^(#|[A-Z][A-Z0-9]{0,9})$/;
 // Путь уходит в URL клона и в имя каталога рядом с worktree: `..` вывел бы его за каталог джобы.
 const PROJECT_PATH = /^[A-Za-z0-9_][\w.-]*(\/[A-Za-z0-9_][\w.-]*)+$/;
 
@@ -72,6 +74,10 @@ export function buildServiceSchema(env: Env) {
       headers: z.record(maybeSecret).default({}),
       tools: z.array(z.string().min(1)).optional(),
       hint: z.string().optional(),
+      prefetch: z
+        .object({ tool: z.string().min(1), arguments: z.record(z.string()).default({}) })
+        .strict()
+        .optional(),
     })
     .strict()
     .refine((c) => (c.command === undefined) !== (c.url === undefined), {
@@ -95,6 +101,7 @@ export function buildServiceSchema(env: Env) {
       agentNetwork: z.boolean().default(false),
       cliTools: z.array(z.string().regex(CLI_TOOL_NAME, 'имя команды без шаблонов и пробелов')).default([]),
       related: z.array(related).default([]),
+      issueKeys: z.record(z.string()).default({}),
     })
     .strict();
 
@@ -121,6 +128,8 @@ export function buildServiceSchema(env: Env) {
         .object({
           maxDiffBytes: z.number().int().positive().default(400_000),
           maxDiffLines: z.number().int().positive().default(20_000),
+          // Выше порога прямые цели уходят агенту файлами, а не текстом промпта.
+          targetsInlineMaxChars: z.number().int().positive().default(60_000),
           coverageFollowup: z
             .object({
               runs: z.number().int().nonnegative().default(5),
@@ -202,6 +211,17 @@ export function buildServiceSchema(env: Env) {
             });
           }
           seen.add(r.project);
+        }
+        for (const [prefix, connector] of Object.entries(p.issueKeys)) {
+          const path = ['profiles', i, 'issueKeys', prefix];
+          if (!ISSUE_KEY_PREFIX.test(prefix)) {
+            ctx.addIssue({ code: z.ZodIssueCode.custom, path, message: 'префикс — заглавная латиница и цифры (PRJ) или #' });
+          }
+          if (!p.connectors.includes(connector)) {
+            ctx.addIssue({ code: z.ZodIssueCode.custom, path, message: `коннектор ${connector} не подключён к профилю` });
+          } else if (!config.connectors[connector]?.prefetch) {
+            ctx.addIssue({ code: z.ZodIssueCode.custom, path, message: `у коннектора ${connector} нет правила prefetch` });
+          }
         }
         if (p.cliTools.length > 0 && !p.agentNetwork) {
           ctx.addIssue({

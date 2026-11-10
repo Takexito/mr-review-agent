@@ -7,6 +7,7 @@ import type { Logger } from '../logger.js';
 import type { GitlabClient } from '../gitlab/client.js';
 import type { Agent, RunOptions } from '../agent/types.js';
 import { NO_ACCESS, type AgentAccess } from '../connectors/engineConfig.js';
+import { openConnector, type OpenConnector } from '../connectors/mcpClient.js';
 import { AgentRateLimitError } from '../agent/types.js';
 import { fetchMrDetails, postAck, reactToNote } from '../gitlab/mr.js';
 import {
@@ -20,6 +21,7 @@ import {
 import { computeDiff } from '../git/diff.js';
 import { CURRENT_THREAD_MARK, fetchThreads, truncateThreads } from '../gitlab/discussions.js';
 import { makeBlobLinker } from '../gitlab/links.js';
+import { downloadImages, imageDegraded, imageHint } from '../gitlab/uploads.js';
 import { checkoutRelated, type RelatedCheckout, type RelatedResult } from '../related/checkout.js';
 import { prepareAsk } from './kinds/ask.js';
 import { prepareBugs } from './kinds/bugs.js';
@@ -48,6 +50,7 @@ const ACK_REACTION = 'eyes';
 export interface ProcessorDeps {
   readonly engines: Record<EngineName, Agent>;
   readonly clients: Partial<Record<EngineName, GitlabClient>>;
+  readonly openConnector?: OpenConnector;
 }
 
 async function bestEffort(promise: Promise<unknown>): Promise<void> {
@@ -200,18 +203,26 @@ export function createProcessor(
       relatedCheckouts = related;
       jlog.info({ related: related.repos.map((r) => `${r.project}@${r.ref}`) }, 'related repositories ready');
 
-      const degraded: string[] = [...related.degraded];
+      // Создаём заранее: `--add-dir` у claude принимает только существующий каталог.
+      const imagesDir = join(jobDir, 'images');
+      await mkdir(imagesDir, { recursive: true });
+      const mrImages = await downloadImages(mr.description, {
+        host: config.gitlabHost,
+        token: config.gitlabToken,
+        dir: imagesDir,
+        project: data.projectPath,
+        prefix: 'mr',
+      });
+
+      const degraded: string[] = [...related.degraded, ...imageDegraded('описания MR', mrImages)];
       const contextHints: string[] = [
         `Описание MR и все его обсуждения целиком лежат в \`${mrFiles.dir}\` (\`description.md\`, \`threads.md\`).`,
+        ...imageHint('описания MR', mrImages),
         ...related.repos.map((r) => relatedHint(r, agent.name)),
       ];
 
       const access = agentAccess(config, profile);
       contextHints.push(...accessHints(access));
-
-      // Создаём заранее: `--add-dir` у claude принимает только существующий каталог.
-      const downloadDir = join(jobDir, 'gitlab-files');
-      await mkdir(downloadDir, { recursive: true });
 
       // Оркестратор держится на суб-агентах codex; у остальных движков общее ревью — это поиск багов.
       const kind = data.kind === 'REVIEW' && agent.name !== 'codex' ? 'BUGS' : data.kind;
@@ -232,14 +243,22 @@ export function createProcessor(
         },
         jobDir,
         worktree,
-        downloadDir,
+        profile,
+        openConnector: deps.openConnector ?? openConnector,
+        imagesDir,
         existingThreads: mrFiles.excerpt,
         contextHints,
         degraded,
         linkify: makeBlobLinker(worktree, config.gitlabHost, data.projectPath, mr.headSha),
       });
 
-      const readDirs = [...related.repos.map((r) => r.dir), mrFiles.dir, downloadDir, ...(prepared.readDirs ?? [])];
+      if ('skipNote' in prepared) {
+        await api.MergeRequestNotes.create(data.projectId, data.mrIid, prepared.skipNote);
+        jlog.info('axis skipped, agent not started');
+        return;
+      }
+
+      const readDirs = [...related.repos.map((r) => r.dir), mrFiles.dir, imagesDir, ...(prepared.readDirs ?? [])];
       const runOptions: RunOptions = {
         cwd: worktree,
         jobDir,

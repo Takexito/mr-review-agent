@@ -1,4 +1,5 @@
-import type { AppConfig } from '../../config.js';
+import type { AppConfig, ProjectProfile } from '../../config.js';
+import type { OpenConnector } from '../../connectors/mcpClient.js';
 import type { Logger } from '../../logger.js';
 import type { GitlabClient } from '../../gitlab/client.js';
 import type { MrDetails } from '../../gitlab/mr.js';
@@ -19,8 +20,12 @@ export interface KindContext {
   readonly diffInput: DiffPromptInput;
   readonly jobDir: string;
   readonly worktree: string;
-  /** Куда предзагрузка постановки складывает бинарные вложения GitLab. */
-  readonly downloadDir: string;
+  /** undefined — профиль убрали из `service.yaml`, пока джоба стояла в очереди. */
+  readonly profile: ProjectProfile | undefined;
+  /** Бот как MCP-клиент коннектора — для предзагрузки прямых целей. */
+  readonly openConnector: OpenConnector;
+  /** Куда бот складывает картинки из описания MR и прямых целей. */
+  readonly imagesDir: string;
   readonly existingThreads: string;
   /** Ось дописывает сюда свои подсказки и пометки — массивы общие с прологом. */
   readonly contextHints: string[];
@@ -40,7 +45,12 @@ export interface PreparedKind {
   publish(output: string, rerun?: AgentRerun): Promise<void>;
 }
 
-export type KindHandler = (ctx: KindContext) => Promise<PreparedKind>;
+/** Ось решила не запускать агента; заметка объясняет почему. */
+export interface SkippedKind {
+  readonly skipNote: string;
+}
+
+export type KindHandler = (ctx: KindContext) => Promise<PreparedKind | SkippedKind>;
 
 /** Самоотчёт агента о покрытии; null — вывод не распарсился, значит отчёта нет. */
 interface CoverageReport {

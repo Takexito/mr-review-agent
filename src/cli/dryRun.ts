@@ -16,7 +16,7 @@ import { redactSecrets } from '../util/redact.js';
  * markdown-файл. Запускать там же, где живёт бот (нужны codex и его песочница):
  *
  *   node dist/cli/dryRun.js --project acme/android-app --mr 163 --kind SPEC \
- *        [--arg '#34 OPS-176' | --arg 'вопрос'] [--out /tmp/dry/spec.md]
+ *        [--arg '#34 PRJ-137' | --arg 'вопрос'] [--out /tmp/dry/spec.md]
  */
 
 const KINDS: readonly JobKind[] = ['REVIEW', 'BUGS', 'STANDARDS', 'SPEC', 'ASK'];

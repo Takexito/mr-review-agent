@@ -7,7 +7,7 @@ import { parseSpecOutput } from '../../codex/parseSpec.js';
 import { parseStandardsOutput } from '../../codex/parseStandards.js';
 import { buildCombinedNote, type AxisSection } from '../../gitlab/postCombinedReview.js';
 import { bugsSections, placeBugsInline, rankBugs } from '../../gitlab/postReview.js';
-import { placeSpecInline, specSections, type PostSpecOptions } from '../../gitlab/postSpecReview.js';
+import { placeSpecInline, SPEC_NOT_RUN, specSections, type PostSpecOptions } from '../../gitlab/postSpecReview.js';
 import { placeViolationsInline, standardsSections } from '../../gitlab/postStandards.js';
 import { bugsCompletion, bugsPrompt, linkifyBugs } from './bugs.js';
 import { prepareSpecAxis } from './spec.js';
@@ -43,7 +43,7 @@ export const prepareReview: KindHandler = async (ctx) => {
     { axis: 'standards', prompt: standardsPrompt(ctx) },
   ];
   const spec = await prepareSpecAxis(ctx);
-  if (spec.sources.length > 0) prompts.push({ axis: 'spec', prompt: spec.prompt });
+  if (spec.state === 'ready') prompts.push({ axis: 'spec', prompt: spec.prompt });
 
   const tasks: AxisTask[] = [];
   for (const { axis, prompt } of prompts) {
@@ -59,7 +59,7 @@ export const prepareReview: KindHandler = async (ctx) => {
       targetBranch: mr.targetBranch,
       tasks,
     }),
-    readDirs: [dir, ...spec.readDirs],
+    readDirs: [dir, ...(spec.state === 'ready' ? spec.readDirs : [])],
     needsWrite: true,
     publish: async (orchestratorOutput, rerun) => {
       const files = new Map<string, AxisFile>();
@@ -79,17 +79,18 @@ export const prepareReview: KindHandler = async (ctx) => {
       // Дочитанное дописывается в конец списков, поэтому индексы `ось:список:N` из ответа
       // оркестратора по-прежнему указывают на те же находки.
       const limits = ctx.config.coverageFollowup;
-      const [bugsReview, standardsReview] = await Promise.all([
+      const [bugsReview, standardsReview, specReview] = await Promise.all([
         bugs?.ok ? completeCoverage(diff, bugs.review, bugsCompletion(ctx), rerun, limits, jlog) : null,
         standards?.ok
           ? completeCoverage(diff, standards.review, standardsCompletion(ctx), rerun, limits, jlog)
           : null,
+        specParsed?.ok && spec.state === 'ready' ? spec.complete(specParsed.spec, rerun) : null,
       ]);
 
       const reviews: AxisReviews = {
         ...(bugsReview ? { bugs: linkifyBugs(bugsReview, linkify) } : {}),
         ...(standardsReview ? { standards: linkifyStandards(standardsReview, linkify) } : {}),
-        ...(specParsed?.ok ? { spec: specParsed.spec } : {}),
+        ...(specReview ? { spec: specReview } : {}),
       };
       const consolidation = parseOrchestratorOutput(orchestratorOutput);
       if (!consolidation) jlog.warn('orchestrator consolidation missing, publishing axes as is');
@@ -126,15 +127,15 @@ export const prepareReview: KindHandler = async (ctx) => {
 
       let specSection = unparsed(
         'spec',
-        spec.sources.length === 0 ? `Сверка с постановкой не запускалась. ${degraded.join(' ')}`.trim() : undefined,
+        spec.state === 'skipped' ? `${SPEC_NOT_RUN} ${spec.reason} ${degraded.join(' ')}`.trim() : undefined,
       );
-      if (deduped.spec && specParsed?.ok) {
+      if (deduped.spec && specReview && spec.state === 'ready') {
         const options: PostSpecOptions = {
-          sources: spec.sources,
+          targets: spec.targets,
           degraded,
           worktree: ctx.worktree,
           linkify,
-          coverage: buildCoverage(diff, specParsed.spec),
+          coverage: buildCoverage(diff, specReview),
           skipInline: deduped.specSkipInline,
         };
         await placeSpecInline(api, data.projectId, data.mrIid, mr, deduped.spec, jlog, options);

@@ -29,8 +29,8 @@ const STANDARDS_KEYWORDS = ['standards', 'standard', 'стандарты', 'ст
 const SPEC_KEYWORDS = ['spec', 'specs', 'спека', 'спеки', 'спеку', 'спек'];
 
 /**
- * Источники требований из аргумента команды `spec`: всё после ключевого слова, по пробелам.
- * Что из этого задача GitLab, а что ключ Linear, разбирает `spec/refs.ts` при запуске джобы.
+ * Прямые цели из аргумента команды `spec`: всё после ключевого слова, по пробелам.
+ * Какой токен — прямая цель, решает `findDirectTargets` по `issueKeys` профиля при запуске джобы.
  */
 export function extractSpecArgs(after: string): string[] {
   return after

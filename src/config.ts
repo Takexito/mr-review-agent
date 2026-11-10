@@ -1,6 +1,5 @@
 import { readFileSync } from 'node:fs';
 import { parse as parseYaml } from 'yaml';
-import { z } from 'zod';
 import { matchesProjectGlob } from './config/glob.js';
 import {
   buildServiceSchema,
@@ -25,17 +24,6 @@ export interface EngineBinding {
   readonly gitlabToken: string;
 }
 
-const TransitionalEnvSchema = z.object({
-  LINEAR_API_KEY: z.string().optional(),
-  LINEAR_API_URL: z.string().url().default('https://api.linear.app/graphql'),
-});
-
-export interface LinearConfig {
-  /** Ключ, которым бот скачивает постановку до запуска движка. Пусто = задачи Linear не скачиваются. */
-  readonly linearApiKey?: string;
-  readonly linearApiUrl: string;
-}
-
 export type { ConnectorConfig };
 
 /** Профиль проекта: какие движки отвечают и какие коннекторы доступны в совпавших проектах. */
@@ -48,6 +36,8 @@ export interface ProjectProfile {
   readonly agentNetwork: boolean;
   readonly cliTools: readonly string[];
   readonly related: readonly RelatedRepo[];
+  /** Префикс ключа задачи → коннектор, скачивающий её как прямую цель. */
+  readonly issueKeys: Readonly<Record<string, string>>;
 }
 
 export interface RelatedRepo {
@@ -57,12 +47,12 @@ export interface RelatedRepo {
   readonly hint?: string;
 }
 
-export interface AppConfig extends LinearConfig {
+export interface AppConfig {
   readonly port: number;
   readonly logLevel: string;
   readonly webhookSecret: string;
   readonly gitlabHost: string;
-  /** Токен бота codex: им ходит общий GitLab-клиент (dry-run, предзагрузка постановки). */
+  /** Токен бота codex: им ходит общий GitLab-клиент (dry-run, картинки из описания MR и целей). */
   readonly gitlabToken: string;
   /** Токен для clone/fetch (может быть урезан до `read_repository`). */
   readonly gitlabCloneToken: string;
@@ -86,6 +76,7 @@ export interface AppConfig extends LinearConfig {
   readonly maxDiffBytes: number;
   /** Порог переключения inline → agentic по числу изменённых строк. */
   readonly maxDiffLines: number;
+  readonly targetsInlineMaxChars: number;
   readonly coverageFollowup: { readonly runs: number; readonly batch: number };
   readonly queueConcurrency: number;
   readonly redisUrl: string;
@@ -98,7 +89,7 @@ export class ConfigError extends Error {
   override readonly name = 'ConfigError';
 }
 
-/** Разбор `service.yaml`; `env` нужен для ссылок `secret:NAME` и временных переменных. */
+/** Разбор `service.yaml`; `env` нужен для ссылок `secret:NAME`. */
 export function parseServiceConfig(yamlText: string, env: NodeJS.ProcessEnv): AppConfig {
   let raw: unknown;
   try {
@@ -115,12 +106,6 @@ export function parseServiceConfig(yamlText: string, env: NodeJS.ProcessEnv): Ap
     throw new ConfigError(`service.yaml:\n${lines.join('\n')}`);
   }
   const file = result.data;
-  const legacyResult = TransitionalEnvSchema.safeParse(env);
-  if (!legacyResult.success) {
-    const lines = legacyResult.error.issues.map((i) => `  ${i.path.join('.')}: ${i.message}`);
-    throw new ConfigError(`env:\n${lines.join('\n')}`);
-  }
-  const legacy = legacyResult.data;
   const { codex, claude } = file.engines;
 
   const bindings: EngineBinding[] = [{ engine: 'codex', handle: codex.bot.username, gitlabToken: codex.bot.token }];
@@ -152,9 +137,8 @@ export function parseServiceConfig(yamlText: string, env: NodeJS.ProcessEnv): Ap
     reposCacheDir: file.git.cacheDir,
     maxDiffBytes: file.review.maxDiffBytes,
     maxDiffLines: file.review.maxDiffLines,
+    targetsInlineMaxChars: file.review.targetsInlineMaxChars,
     coverageFollowup: file.review.coverageFollowup,
-    linearApiKey: legacy.LINEAR_API_KEY || undefined,
-    linearApiUrl: legacy.LINEAR_API_URL,
     connectors: file.connectors,
     profiles: file.profiles.map((p) => ({ ...p, engines: p.engines ?? configured })),
   };

@@ -24,6 +24,8 @@ review:
   # Порог переключения inline → agentic (не размер усечения).
   maxDiffBytes: 400000
   maxDiffLines: 20000
+  # Выше порога (символов) прямые цели уходят агенту файлами с оглавлением в промпте.
+  targetsInlineMaxChars: 60000
   # Дочитывание пропущенных агентом файлов: прогонов на ось (0 — выкл.) и файлов в прогоне.
   coverageFollowup: { runs: 5, batch: 40 }
 
@@ -45,6 +47,9 @@ engines:
 # или url (http); токены в env/headers — через secret:NAME и только на чтение: запрет записи
 # держит сама система, а tools лишь сужает выдачу агенту (без tools открыт весь сервер).
 # hint попадает в промпт. Коннектор доступен проекту, только если его перечисляет профиль.
+# prefetch — как БОТ скачивает прямую цель до запуска движка (ADR 0003): инструмент и шаблон
+# аргументов; {key} — PRJ-137 / #34, {number} — 137 / 34, {project} — проект задачи GitLab или MR.
+# Ответ кладётся как есть; привязанные документы — то, что вернул этот же инструмент.
 connectors: {}
 #  gitlab:
 #    command: npx
@@ -55,12 +60,14 @@ connectors: {}
 #      GITLAB_PERMISSION_MODE: readonly
 #    tools: [get_merge_request, mr_discussions, get_issue, list_issue_links, get_file_contents, download_attachment]
 #    hint: Задачи (#34), чужие MR (!12), файлы и вложения GitLab по ссылкам из требований и тредов.
+#    prefetch: { tool: get_issue, arguments: { project_id: "{project}", issue_iid: "{number}" } }
 #  linear:
 #    command: npx
 #    args: [-y, "@tacticlaunch/mcp-linear"]
 #    env: { LINEAR_API_TOKEN: secret:LINEAR_MCP_TOKEN }
 #    tools: [linear_getIssueById, linear_searchIssues, linear_getIssueDocuments]
 #    hint: Задачи Linear по ключу вида PRJ-137 и их документы.
+#    prefetch: { tool: linear_getIssueById, arguments: { id: "{key}" } }
 
 # Профили проектов: glob по path_with_namespace (* — внутри сегмента, ** — любые сегменты).
 # Побеждает первый совпавший; проект без профиля бот игнорирует.
@@ -69,7 +76,11 @@ profiles:
     projects: [acme/android-app]
     # Какие боты отвечают в проекте. Пусто = все настроенные движки.
     # engines: [codex]
-    # connectors: [linear]
+    # connectors: [linear, gitlab]
+    # Прямые цели MR: префикс ключа → коннектор с prefetch; "#" — задачи GitLab (#34, ветка 34-…).
+    # Ищутся в заголовке MR, имени ветки, строках Closes/Fixes/Resolves/Refs и аргументе `spec`.
+    # Без issueKeys ось постановки не запускается.
+    # issueKeys: { PRJ: linear, "#": gitlab }
     # Сеть у самого агента: по умолчанию выкл.; cliTools — только вместе с ней.
     # agentNetwork: false
     # cliTools: [glab]
