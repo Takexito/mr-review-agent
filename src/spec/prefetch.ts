@@ -53,8 +53,18 @@ async function saveImages(images: readonly ToolImage[], target: DirectTarget, di
   return lines;
 }
 
-function reason(error: unknown): string {
-  return redactSecrets(error instanceof Error ? error.message : String(error));
+/** Ключи приходят из текста MR: без потолка любой автор MR запустит сотню вызовов инструмента. */
+const MAX_TARGETS = 10;
+/** Ответ-ошибку пишет сервер коннектора — он уходит в заметку MR, а сервер мог процитировать в нём свой env. */
+const MAX_REASON_CHARS = 500;
+
+function reason(text: string): string {
+  const clean = redactSecrets(text.trim());
+  return clean.length > MAX_REASON_CHARS ? `${clean.slice(0, MAX_REASON_CHARS)}…` : clean;
+}
+
+function errorReason(error: unknown): string {
+  return reason(error instanceof Error ? error.message : String(error));
 }
 
 /** Скачивает прямые цели как MCP-клиент коннектора. Ничего не бросает: нескачавшаяся цель — строка в `degraded`. */
@@ -73,8 +83,11 @@ export async function prefetchTargets(targets: readonly DirectTarget[], deps: Pr
     return opened;
   };
 
+  if (targets.length > MAX_TARGETS) {
+    degraded.push(`Прямых целей больше ${MAX_TARGETS} — не скачаны: ${targets.slice(MAX_TARGETS).map((t) => t.label).join(', ')}.`);
+  }
   try {
-    for (const target of targets) {
+    for (const target of targets.slice(0, MAX_TARGETS)) {
       const rule = deps.connectors[target.connector]?.prefetch;
       const fail = (why: string): void => {
         degraded.push(`Цель ${target.label} не скачалась (${target.connector}): ${why}`);
@@ -86,7 +99,7 @@ export async function prefetchTargets(targets: readonly DirectTarget[], deps: Pr
       try {
         const result = await (await session(target.connector)).call(rule.tool, fillTemplate(rule.arguments, target));
         if (result.isError) {
-          fail(result.text.trim() || `инструмент ${rule.tool} вернул ошибку`);
+          fail(reason(result.text) || `инструмент ${rule.tool} вернул ошибку`);
           continue;
         }
         if (result.text.trim().length === 0 && result.images.length === 0) {
@@ -96,8 +109,8 @@ export async function prefetchTargets(targets: readonly DirectTarget[], deps: Pr
         const images = await saveImages(result.images, target, deps.imagesDir);
         fetched.push({ target, text: [result.text, ...images].join('\n\n') });
       } catch (error) {
-        deps.log.warn({ target: target.label, connector: target.connector, err: reason(error) }, 'target prefetch failed');
-        fail(reason(error));
+        deps.log.warn({ target: target.label, connector: target.connector, err: errorReason(error) }, 'target prefetch failed');
+        fail(errorReason(error));
       }
     }
   } finally {

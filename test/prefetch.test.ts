@@ -93,6 +93,25 @@ describe('prefetchTargets', () => {
     expect(result.degraded).toEqual(['Цель PRJ-137 не скачалась (linear): Issue not found']);
   });
 
+  it('should redact and shorten the error text of the tool', async () => {
+    const long = `token glpat-abc123 ${'x'.repeat(2000)}`;
+    const fake = fakeOpen(() => ({ isError: true, text: long, images: [] }));
+    const [line] = (await prefetchTargets([prj], await deps(fake.open))).degraded;
+
+    expect(line).toContain('glpat-***');
+    expect(line).not.toContain('abc123');
+    expect(line!.length).toBeLessThan(700);
+  });
+
+  it('should download at most ten targets and report the rest', async () => {
+    const fake = fakeOpen(() => text('ok'));
+    const many = Array.from({ length: 12 }, (_, i): DirectTarget => ({ ...prj, label: `PRJ-${i + 1}`, number: String(i + 1) }));
+    const result = await prefetchTargets(many, await deps(fake.open));
+
+    expect(fake.calls).toHaveLength(10);
+    expect(result.degraded).toEqual(['Прямых целей больше 10 — не скачаны: PRJ-11, PRJ-12.']);
+  });
+
   it('should report an empty reply as a target that did not download', async () => {
     const fake = fakeOpen(() => text('  '));
     const result = await prefetchTargets([prj], await deps(fake.open));

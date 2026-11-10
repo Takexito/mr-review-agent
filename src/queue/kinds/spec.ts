@@ -46,8 +46,16 @@ export async function prepareSpecAxis(ctx: KindContext): Promise<SpecAxis> {
 
   const found = findDirectTargets(
     { title: mr.title, branch: mr.sourceBranch, description: mr.description, args: data.specRefs },
-    { issueKeys, gitlabHost: config.gitlabHost, projectPath: data.projectPath },
+    {
+      issueKeys,
+      gitlabHost: config.gitlabHost,
+      projectPath: data.projectPath,
+      otherProjects: ctx.profile.related.map((r) => r.project),
+    },
   );
+  for (const label of found.foreign) {
+    degraded.push(`Задача \`${label}\` — из проекта вне профиля (не этот и не смежный репозиторий): бот её не читает.`);
+  }
   for (const token of found.unmatched) {
     degraded.push(`\`${token}\` из команды не подходит ни под один префикс задач профиля (${prefixes.join(', ')}).`);
   }
@@ -79,6 +87,7 @@ export async function prepareSpecAxis(ctx: KindContext): Promise<SpecAxis> {
       token: config.gitlabToken,
       dir: ctx.imagesDir,
       project: target.project,
+      allowedProjects: ctx.allowedProjects,
       prefix: `target-${safeFileName(target.label)}`,
     });
     hints.push(...imageHint(`цели ${target.label}`, images));

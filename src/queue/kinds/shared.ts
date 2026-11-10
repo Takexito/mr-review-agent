@@ -26,6 +26,8 @@ export interface KindContext {
   readonly openConnector: OpenConnector;
   /** Куда бот складывает картинки из описания MR и прямых целей. */
   readonly imagesDir: string;
+  /** Проект MR и смежные репозитории профиля: только их вложения бот скачивает своим токеном. */
+  readonly allowedProjects: readonly string[];
   readonly existingThreads: string;
   /** Ось дописывает сюда свои подсказки и пометки — массивы общие с прологом. */
   readonly contextHints: string[];

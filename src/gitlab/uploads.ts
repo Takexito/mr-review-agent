@@ -8,6 +8,8 @@ export interface ImageDownloadConfig {
   readonly dir: string;
   /** Проект, к которому относятся относительные ссылки `/uploads/…` в тексте. */
   readonly project: string;
+  /** Вложения других проектов своего GitLab не скачиваются: токен бота видит больше, чем автор текста. */
+  readonly allowedProjects: readonly string[];
   /** Префикс имён файлов: разводит картинки описания MR и разных целей. */
   readonly prefix: string;
 }
@@ -20,7 +22,7 @@ export interface SavedImage {
 export interface ImageDownloads {
   readonly saved: readonly SavedImage[];
   readonly failed: readonly string[];
-  /** Картинки на чужих хостах: токен бота туда не уходит, и они не скачиваются. */
+  /** Картинки чужих хостов и проектов вне профиля: не скачиваются. */
   readonly foreign: number;
 }
 
@@ -57,8 +59,8 @@ function parseUpload(raw: string, host: string, project: string): UploadLink | '
   }
   const byPath = /^\/(.+?)\/uploads\/([0-9a-f]{32})\/(.+)$/.exec(path);
   if (byPath) return { project: byPath[1]!, secret: byPath[2]!, filename: byPath[3]! };
-  const byId = /^\/-\/project\/(\d+)\/uploads\/([0-9a-f]{32})\/(.+)$/.exec(path);
-  if (byId) return { project: byId[1]!, secret: byId[2]!, filename: byId[3]! };
+  // `/-/project/<id>/uploads/…` проверить по пути проекта нельзя — считаем чужой.
+  if (/^\/-\/project\/\d+\/uploads\//.test(path)) return 'foreign';
   return null;
 }
 
@@ -92,7 +94,7 @@ export async function downloadImages(markdown: string, config: ImageDownloadConf
   const uploads: { url: string; link: UploadLink }[] = [];
   for (const url of imageUrls(markdown)) {
     const link = parseUpload(url, config.host, config.project);
-    if (link === 'foreign') foreign += 1;
+    if (link === 'foreign' || (link && !config.allowedProjects.includes(link.project))) foreign += 1;
     else if (link) uploads.push({ url, link });
   }
   if (uploads.length > MAX_IMAGES) {
@@ -135,7 +137,7 @@ export function imageHint(what: string, downloads: ImageDownloads): string[] {
 export function imageDegraded(what: string, downloads: ImageDownloads): string[] {
   const lines = downloads.failed.map((f) => `Картинка из ${what} не скачалась: ${f}`);
   if (downloads.foreign > 0) {
-    lines.push(`Картинок из ${what} на чужих хостах: ${downloads.foreign} — бот их не скачивает, агенту они недоступны.`);
+    lines.push(`Картинок из ${what} с чужих хостов или из проектов вне профиля: ${downloads.foreign} — бот их не скачивает, агенту они недоступны.`);
   }
   return lines;
 }

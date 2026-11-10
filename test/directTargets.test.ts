@@ -5,6 +5,7 @@ const rules: TargetRules = {
   issueKeys: { PRJ: 'linear', '#': 'gitlab' },
   gitlabHost: 'https://gitlab.com',
   projectPath: 'acme/android-app',
+  otherProjects: ['acme/docs', 'acme/backend'],
 };
 
 const mr = { title: '', branch: 'main', description: '' };
@@ -61,6 +62,12 @@ describe('findDirectTargets', () => {
       ]);
     });
 
+    it('should refuse issues of projects outside the profile and report them', () => {
+      const found = findDirectTargets({ ...mr, description: 'Closes secret/vault#5, PRJ-1' }, rules);
+      expect(found.targets.map((t) => t.label)).toEqual(['PRJ-1']);
+      expect(found.foreign).toEqual(['secret/vault#5']);
+    });
+
     it('should name an issue of the MR project by its short form whatever way it is written', () => {
       const description = 'Fixes https://gitlab.com/acme/android-app/-/work_items/34 и acme/android-app#34';
       expect(labels({ title: '#34', description })).toEqual(['#34']);
@@ -69,7 +76,7 @@ describe('findDirectTargets', () => {
     it('should take the project of an issue url relative to a GitLab installed under a sub-path', () => {
       const found = findDirectTargets(
         { ...mr, description: 'Closes https://host.dev/gitlab/g/docs/-/issues/7' },
-        { ...rules, gitlabHost: 'https://host.dev/gitlab' },
+        { ...rules, gitlabHost: 'https://host.dev/gitlab', otherProjects: ['g/docs'] },
       );
       expect(found.targets.map((t) => t.project)).toEqual(['g/docs']);
     });

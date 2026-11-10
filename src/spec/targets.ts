@@ -24,12 +24,19 @@ export interface TargetRules {
   readonly issueKeys: Readonly<Record<string, string>>;
   readonly gitlabHost: string;
   readonly projectPath: string;
+  /**
+   * Проекты, задачи которых тоже могут быть целью, — смежные репозитории профиля. Задачу любого
+   * другого проекта бот читал бы своим токеном за того, кто сам доступа к ней не имеет.
+   */
+  readonly otherProjects?: readonly string[];
 }
 
 export interface FoundTargets {
   readonly targets: readonly DirectTarget[];
   /** Токены аргумента команды, не подошедшие ни под один префикс. */
   readonly unmatched: readonly string[];
+  /** Задачи GitLab проектов вне профиля: не скачиваются. */
+  readonly foreign: readonly string[];
 }
 
 interface Found {
@@ -136,13 +143,18 @@ function linkLineTargets(description: string, rules: TargetRules): DirectTarget[
   return targets;
 }
 
-function unique(targets: readonly DirectTarget[]): DirectTarget[] {
+function result(targets: readonly DirectTarget[], unmatched: readonly string[], rules: TargetRules): FoundTargets {
+  const allowed = new Set([rules.projectPath, ...(rules.otherProjects ?? [])]);
   const seen = new Set<string>();
-  return targets.filter((t) => {
-    if (seen.has(t.label)) return false;
+  const kept: DirectTarget[] = [];
+  const foreign: string[] = [];
+  for (const t of targets) {
+    if (seen.has(t.label)) continue;
     seen.add(t.label);
-    return true;
-  });
+    if (allowed.has(t.project)) kept.push(t);
+    else foreign.push(t.label);
+  }
+  return { targets: kept, unmatched, foreign };
 }
 
 /**
@@ -158,12 +170,12 @@ export function findDirectTargets(sources: MrTargetFields, rules: TargetRules): 
       if (found.length === 0) unmatched.push(token);
       targets.push(...found);
     }
-    return { targets: unique(targets), unmatched };
+    return result(targets, unmatched, rules);
   }
   const targets = [
     ...targetsIn(sources.title, rules),
     ...targetsIn(sources.branch, rules, true),
     ...linkLineTargets(sources.description, rules),
   ];
-  return { targets: unique(targets), unmatched: [] };
+  return result(targets, [], rules);
 }

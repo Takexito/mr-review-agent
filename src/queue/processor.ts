@@ -206,11 +206,13 @@ export function createProcessor(
       // Создаём заранее: `--add-dir` у claude принимает только существующий каталог.
       const imagesDir = join(jobDir, 'images');
       await mkdir(imagesDir, { recursive: true });
+      const allowedProjects = [data.projectPath, ...(profile?.related ?? []).map((r) => r.project)];
       const mrImages = await downloadImages(mr.description, {
         host: config.gitlabHost,
         token: config.gitlabToken,
         dir: imagesDir,
         project: data.projectPath,
+        allowedProjects,
         prefix: 'mr',
       });
 
@@ -246,6 +248,7 @@ export function createProcessor(
         profile,
         openConnector: deps.openConnector ?? openConnector,
         imagesDir,
+        allowedProjects,
         existingThreads: mrFiles.excerpt,
         contextHints,
         degraded,

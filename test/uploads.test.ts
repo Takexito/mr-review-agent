@@ -12,7 +12,7 @@ afterEach(() => {
 });
 
 async function config() {
-  return { host: HOST, token: 'secret', dir: await mkdtemp(join(tmpdir(), 'uploads-')), project: 'g/p', prefix: 'mr' };
+  return { host: HOST, token: 'secret', dir: await mkdtemp(join(tmpdir(), 'uploads-')), project: 'g/p', allowedProjects: ['g/p'], prefix: 'mr' };
 }
 
 describe('downloadImages', () => {
@@ -37,6 +37,16 @@ describe('downloadImages', () => {
     const result = await downloadImages(`![a](https://evil.example/g/p/uploads/${SECRET}/a.png)`, await config());
 
     expect(result).toEqual({ saved: [], failed: [], foreign: 1 });
+    expect(mock).not.toHaveBeenCalled();
+  });
+
+  it('should not download uploads of a project outside the profile', async () => {
+    const mock = vi.fn();
+    vi.stubGlobal('fetch', mock);
+
+    const result = await downloadImages(`![a](${HOST}/secret/vault/uploads/${SECRET}/a.png)`, await config());
+
+    expect(result.foreign).toBe(1);
     expect(mock).not.toHaveBeenCalled();
   });
 
