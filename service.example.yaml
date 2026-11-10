@@ -55,19 +55,20 @@ engines:
 connectors: {}
 #  gitlab:
 #    command: npx
-#    args: [-y, "@zereight/mcp-gitlab"]
+#    args: [-y, "@zereight/mcp-gitlab@2.3.22"]
 #    env:
 #      GITLAB_PERSONAL_ACCESS_TOKEN: secret:GITLAB_MCP_TOKEN
 #      GITLAB_API_URL: https://gitlab.com/api/v4
 #      GITLAB_PERMISSION_MODE: readonly
-#    tools: [get_merge_request, mr_discussions, get_issue, list_issue_links, get_file_contents, download_attachment]
+#    tools: [get_issue, list_issue_discussions, list_issues, get_merge_request, mr_discussions, get_file_contents, get_repository_tree]
 #    hint: Задачи (#34), чужие MR (!12), файлы и вложения GitLab по ссылкам из требований и тредов.
 #    prefetch: { tool: get_issue, arguments: { project_id: "{project}", issue_iid: "{number}" } }
 #  linear:
 #    command: npx
-#    args: [-y, "@tacticlaunch/mcp-linear"]
+#    args: [-y, "@tacticlaunch/mcp-linear@1.4.5"]
+#    # У сервера есть пишущие инструменты и нет режима только чтения: ключ обязан быть Read-only.
 #    env: { LINEAR_API_TOKEN: secret:LINEAR_MCP_TOKEN }
-#    tools: [linear_getIssueById, linear_searchIssues, linear_getIssueDocuments]
+#    tools: [linear_getIssueById, linear_searchIssues, linear_getComments, linear_getAttachments, linear_getDocumentById, linear_searchDocuments]
 #    hint: Задачи Linear по ключу вида PRJ-137 и их документы.
 #    prefetch: { tool: linear_getIssueById, arguments: { id: "{key}" } }
 #    # Картинки этих хостов в тексте прямых целей коннектора бот качает с этими заголовками (только https,
