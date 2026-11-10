@@ -10,6 +10,7 @@ export interface StandardsPromptInput extends DiffPromptInput {
   /** Существующие треды MR (для дедупа). Пусто = нет. */
   readonly existingThreads?: string;
   readonly contextHints?: readonly string[];
+  readonly declaredStandards?: readonly string[];
 }
 
 /**
@@ -63,6 +64,13 @@ export function buildStandardsPrompt(input: StandardsPromptInput): string {
     'Стандарт — документ репозитория о том, КАК здесь пишут код: `AGENTS.md` и `CLAUDE.md` (в корне и в каталогах',
     'изменённых файлов), `CONTEXT.md`, `CONTRIBUTING.md`, `docs/adr/`, `docs/guides/`, руководства по тестам, скиллы агентов.',
     'Найди их поиском по репозиторию и прочитай те, что касаются изменённых модулей.',
+    ...(input.declaredStandards && input.declaredStandards.length > 0
+      ? [
+          `Проект сам назвал своими стандартами (\`.review.yml\`): ${input.declaredStandards.map((d) => `\`${d}\``).join(', ')} — прочитай их первыми и целиком,`,
+          // В worktree лежит head MR: оттуда автор MR переписал бы объявленный стандарт в том же MR.
+          `версию из target-ветки: \`git show ${input.targetBranch}:<путь>\`.`,
+        ]
+      : []),
     'Конфиги линтеров и форматтеров (detekt, lint, `.editorconfig`, CI) прочитай отдельно — по ним видно, что ловит инструмент.',
     'Документы вроде `AGENTS.md` написаны для агента, который пишет код: указания о том, как вести работу, что спрашивать',
     'и какие команды запускать, к готовому коду не относятся. Сверяй только требования к самому коду.',

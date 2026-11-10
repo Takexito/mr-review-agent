@@ -1,4 +1,5 @@
 import type { AppConfig, ProjectProfile } from '../../config.js';
+import type { RepoSettings } from '../../config/repoConfig.js';
 import type { OpenConnector } from '../../connectors/mcpClient.js';
 import type { Logger } from '../../logger.js';
 import type { GitlabClient } from '../../gitlab/client.js';
@@ -20,13 +21,17 @@ export interface KindContext {
   readonly diffInput: DiffPromptInput;
   readonly jobDir: string;
   readonly worktree: string;
-  /** undefined — профиль убрали из `service.yaml`, пока джоба стояла в очереди. */
+  /** После слияния с `.review.yml`; undefined — профиль убрали из `service.yaml`, пока джоба стояла в очереди. */
   readonly profile: ProjectProfile | undefined;
+  readonly repo: Pick<RepoSettings, 'exclude' | 'standards'>;
   /** Бот как MCP-клиент коннектора — для предзагрузки прямых целей. */
   readonly openConnector: OpenConnector;
   /** Куда бот складывает картинки из описания MR и прямых целей. */
   readonly imagesDir: string;
-  /** Проект MR и смежные репозитории профиля: только их вложения бот скачивает своим токеном. */
+  /**
+   * Проект MR и смежные репозитории профиля — только их задачи и вложения бот читает своим токеном:
+   * ссылку на любой другой проект может вписать в MR тот, у кого к нему доступа нет.
+   */
   readonly allowedProjects: readonly string[];
   readonly existingThreads: string;
   /** Ось дописывает сюда свои подсказки и пометки — массивы общие с прологом. */

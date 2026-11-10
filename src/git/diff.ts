@@ -36,6 +36,8 @@ export interface DiffResult {
 export interface DiffLimits {
   readonly maxBytes: number;
   readonly maxLines: number;
+  /** Glob-пути от корня репозитория, которые в дифф не входят (`exclude` из `.review.yml`). */
+  readonly exclude?: readonly string[];
 }
 
 /**
@@ -94,8 +96,9 @@ export async function computeDiff(
   limits: DiffLimits,
 ): Promise<DiffResult> {
   const range = `${baseSha}..${headSha}`;
+  const pathspec = limits.exclude?.length ? ['--', ...limits.exclude.map((p) => `:(exclude,glob)${p}`)] : [];
   const git = (args: string[], maxBuffer: number): Promise<string> =>
-    execa('git', ['-C', cacheDir, ...args], { maxBuffer }).then((r) => r.stdout);
+    execa('git', ['-C', cacheDir, ...args, ...pathspec], { maxBuffer }).then((r) => r.stdout);
 
   const numstat = await git(['diff', '--numstat', '--no-color', range], 8 * 1024 * 1024);
   const files = parseNumstat(numstat);

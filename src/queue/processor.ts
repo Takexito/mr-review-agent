@@ -15,10 +15,13 @@ import {
   createJobDir,
   ensureBareCache,
   MissingRevisionError,
+  readBranchFile,
+  RepoFileTooLargeError,
   removeJobDir,
   removeWorktree,
 } from '../git/checkout.js';
 import { computeDiff } from '../git/diff.js';
+import { applyRepoConfig, REPO_CONFIG_FILE, type RepoConfigResult } from '../config/repoConfig.js';
 import { CURRENT_THREAD_MARK, fetchThreads, truncateThreads } from '../gitlab/discussions.js';
 import { makeBlobLinker } from '../gitlab/links.js';
 import { downloadImages, imageDegraded, imageHint } from '../gitlab/uploads.js';
@@ -176,13 +179,32 @@ export function createProcessor(
       throw error;
     }
 
+    const baseProfile = resolveProfile(config, data.projectPath);
+    const repo = baseProfile ? await loadRepoConfig(cacheDir, mr.targetBranch, baseProfile) : null;
+    // На каждый вопрос в треде одна и та же заметка была бы шумом: хватает её у ревью.
+    if (repo && repo.errors.length > 0 && data.kind !== 'ASK') {
+      jlog.warn({ errors: repo.errors }, 'repository config ignored');
+      await bestEffort(
+        postAck(
+          api,
+          data.projectId,
+          data.mrIid,
+          [`⚠️ \`${REPO_CONFIG_FILE}\` в ветке \`${mr.targetBranch}\` проигнорирован — ревью идёт по настройкам профиля:`, ...repo.errors.map((e) => `- ${e}`)].join('\n'),
+        ),
+      );
+    }
+    const profile = repo?.profile;
+    const exclude = repo?.exclude ?? [];
+
     const diff = await computeDiff(cacheDir, mr.baseSha, mr.headSha, {
+      exclude,
       maxBytes: config.maxDiffBytes,
       maxLines: config.maxDiffLines,
     });
 
     if (diff.files.length === 0) {
-      await bestEffort(postAck(api, data.projectId, data.mrIid, '🤖 дифф пуст — нечего проверять.'));
+      const why = exclude.length > 0 ? ` (без путей из \`exclude\` в \`${REPO_CONFIG_FILE}\`)` : '';
+      await bestEffort(postAck(api, data.projectId, data.mrIid, `🤖 дифф пуст${why} — нечего проверять.`));
       jlog.info('empty diff, nothing to do');
       return;
     }
@@ -196,7 +218,6 @@ export function createProcessor(
       // видеть тред, в который отвечает (реплай на собственное замечание бота).
       const mrFiles = await writeMrFiles(api, data, mr, jobDir, jlog);
 
-      const profile = resolveProfile(config, data.projectPath);
       const related = await checkoutRelated(profile?.related ?? [], { jobDir, sourceBranch: mr.sourceBranch }, jlog, {
         ensureCache: (project) => ensureBareCache(config, project),
       });
@@ -220,6 +241,9 @@ export function createProcessor(
       const contextHints: string[] = [
         `Описание MR и все его обсуждения целиком лежат в \`${mrFiles.dir}\` (\`description.md\`, \`threads.md\`).`,
         ...imageHint('описания MR', mrImages),
+        ...(exclude.length > 0
+          ? [`Пути, исключённые из ревью в \`${REPO_CONFIG_FILE}\`: ${exclude.map((e) => `\`${e}\``).join(', ')} — в дифф они не вошли, замечаний по ним не пиши.`]
+          : []),
         ...related.repos.map((r) => relatedHint(r, agent.name)),
       ];
 
@@ -239,6 +263,7 @@ export function createProcessor(
           diffMode: diff.mode,
           diff: diff.text,
           diffStat: diff.diffStat,
+          exclude,
           files: diff.files,
           baseSha: mr.baseSha,
           headSha: mr.headSha,
@@ -246,6 +271,7 @@ export function createProcessor(
         jobDir,
         worktree,
         profile,
+        repo: repo ?? { exclude: [], standards: [] },
         openConnector: deps.openConnector ?? openConnector,
         imagesDir,
         allowedProjects,
@@ -290,6 +316,15 @@ interface RunCtx {
   readonly projectId: number;
   readonly mrIid: number;
   readonly jlog: Logger;
+}
+
+async function loadRepoConfig(cacheDir: string, branch: string, profile: ProjectProfile): Promise<RepoConfigResult> {
+  try {
+    return applyRepoConfig(await readBranchFile(cacheDir, branch, REPO_CONFIG_FILE), profile);
+  } catch (error) {
+    if (!(error instanceof RepoFileTooLargeError)) throw error;
+    return { ...applyRepoConfig(null, profile), errors: [error.message] };
+  }
 }
 
 /**

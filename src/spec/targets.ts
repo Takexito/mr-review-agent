@@ -24,11 +24,8 @@ export interface TargetRules {
   readonly issueKeys: Readonly<Record<string, string>>;
   readonly gitlabHost: string;
   readonly projectPath: string;
-  /**
-   * Проекты, задачи которых тоже могут быть целью, — смежные репозитории профиля. Задачу любого
-   * другого проекта бот читал бы своим токеном за того, кто сам доступа к ней не имеет.
-   */
-  readonly otherProjects?: readonly string[];
+  /** Проекты, задачи которых могут быть целью, — см. `KindContext.allowedProjects`. */
+  readonly allowedProjects: readonly string[];
 }
 
 export interface FoundTargets {
@@ -143,8 +140,8 @@ function linkLineTargets(description: string, rules: TargetRules): DirectTarget[
   return targets;
 }
 
-function result(targets: readonly DirectTarget[], unmatched: readonly string[], rules: TargetRules): FoundTargets {
-  const allowed = new Set([rules.projectPath, ...(rules.otherProjects ?? [])]);
+function keepAllowed(targets: readonly DirectTarget[], unmatched: readonly string[], rules: TargetRules): FoundTargets {
+  const allowed = new Set(rules.allowedProjects);
   const seen = new Set<string>();
   const kept: DirectTarget[] = [];
   const foreign: string[] = [];
@@ -170,12 +167,12 @@ export function findDirectTargets(sources: MrTargetFields, rules: TargetRules): 
       if (found.length === 0) unmatched.push(token);
       targets.push(...found);
     }
-    return result(targets, unmatched, rules);
+    return keepAllowed(targets, unmatched, rules);
   }
   const targets = [
     ...targetsIn(sources.title, rules),
     ...targetsIn(sources.branch, rules, true),
     ...linkLineTargets(sources.description, rules),
   ];
-  return result(targets, [], rules);
+  return keepAllowed(targets, [], rules);
 }

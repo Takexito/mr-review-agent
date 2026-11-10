@@ -36,6 +36,8 @@ export interface ProjectProfile {
   readonly agentNetwork: boolean;
   readonly cliTools: readonly string[];
   readonly related: readonly RelatedRepo[];
+  /** Glob по `path_with_namespace`: какие смежные репозитории может добавить `.review.yml`. */
+  readonly relatedAllowlist: readonly string[];
   /** Префикс ключа задачи → коннектор, скачивающий её как прямую цель. */
   readonly issueKeys: Readonly<Record<string, string>>;
 }

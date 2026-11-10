@@ -8,7 +8,7 @@ export interface ImageDownloadConfig {
   readonly dir: string;
   /** Проект, к которому относятся относительные ссылки `/uploads/…` в тексте. */
   readonly project: string;
-  /** Вложения других проектов своего GitLab не скачиваются: токен бота видит больше, чем автор текста. */
+  /** См. `KindContext.allowedProjects`. */
   readonly allowedProjects: readonly string[];
   /** Префикс имён файлов: разводит картинки описания MR и разных целей. */
   readonly prefix: string;

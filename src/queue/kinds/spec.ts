@@ -50,7 +50,7 @@ export async function prepareSpecAxis(ctx: KindContext): Promise<SpecAxis> {
       issueKeys,
       gitlabHost: config.gitlabHost,
       projectPath: data.projectPath,
-      otherProjects: ctx.profile.related.map((r) => r.project),
+      allowedProjects: ctx.allowedProjects,
     },
   );
   for (const label of found.foreign) {

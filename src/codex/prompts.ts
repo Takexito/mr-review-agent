@@ -22,6 +22,13 @@ export interface DiffPromptInput {
   readonly files?: readonly ChangedFile[];
   readonly baseSha?: string;
   readonly headSha?: string;
+  /** Пути, исключённые из диффа (`exclude` из `.review.yml`). */
+  readonly exclude?: readonly string[];
+}
+
+/** Те же pathspec, что у бота в `computeDiff`: иначе агент сам прочитает исключённое. */
+function excludeSpec(exclude: readonly string[] | undefined): string {
+  return exclude && exclude.length > 0 ? ` -- ${exclude.map((p) => `':(exclude,glob)${p}'`).join(' ')}` : '';
 }
 
 /** Сколько файлов перечисляем поимённо, прежде чем отослать к diffstat. */
@@ -59,7 +66,7 @@ export function diffSection(input: DiffPromptInput): string[] {
     'прочитай дифф сам, пофайлово. Это не опция: без чтения ты не видишь изменений вообще.',
     '',
     `Команда на файл: \`git diff ${range} -- <файл>\``,
-    `Весь дифф разом: \`git diff ${range}\` (может быть очень большим — лучше по файлам).`,
+    `Весь дифф разом: \`git diff ${range}${excludeSpec(input.exclude)}\` (может быть очень большим — лучше по файлам).`,
     '',
     'Полный состав изменения (git diff --stat):',
     '```',

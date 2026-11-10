@@ -61,6 +61,31 @@ async function exists(path: string): Promise<boolean> {
   }
 }
 
+const MAX_REPO_FILE_BYTES = 64 * 1024;
+
+export class RepoFileTooLargeError extends Error {
+  constructor(readonly bytes: number) {
+    super(`файл ${bytes} байт — больше ${MAX_REPO_FILE_BYTES}`);
+    this.name = 'RepoFileTooLargeError';
+  }
+}
+
+/**
+ * Файл из ветки bare-кэша; null — нет ветки или файла. Кэш тянет ветки как `refs/heads/*`,
+ * поэтому target-ветка MR в нём есть после `ensureBareCache`.
+ */
+export async function readBranchFile(cacheDir: string, branch: string, path: string): Promise<string | null> {
+  const rev = `refs/heads/${branch}:${path}`;
+  let size: number;
+  try {
+    size = Number((await execa('git', ['-C', cacheDir, 'cat-file', '-s', rev])).stdout);
+  } catch {
+    return null;
+  }
+  if (size > MAX_REPO_FILE_BYTES) throw new RepoFileTooLargeError(size);
+  return (await execa('git', ['-C', cacheDir, 'cat-file', 'blob', rev], { stripFinalNewline: false })).stdout;
+}
+
 /** Есть ли коммит в кэше. Без этого агент в agentic-режиме упрётся в `bad object`. */
 export async function hasCommit(cacheDir: string, sha: string): Promise<boolean> {
   try {

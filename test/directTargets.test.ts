@@ -5,7 +5,7 @@ const rules: TargetRules = {
   issueKeys: { PRJ: 'linear', '#': 'gitlab' },
   gitlabHost: 'https://gitlab.com',
   projectPath: 'acme/android-app',
-  otherProjects: ['acme/docs', 'acme/backend'],
+  allowedProjects: ['acme/android-app', 'acme/docs', 'acme/backend'],
 };
 
 const mr = { title: '', branch: 'main', description: '' };
@@ -76,7 +76,7 @@ describe('findDirectTargets', () => {
     it('should take the project of an issue url relative to a GitLab installed under a sub-path', () => {
       const found = findDirectTargets(
         { ...mr, description: 'Closes https://host.dev/gitlab/g/docs/-/issues/7' },
-        { ...rules, gitlabHost: 'https://host.dev/gitlab', otherProjects: ['g/docs'] },
+        { ...rules, gitlabHost: 'https://host.dev/gitlab', allowedProjects: ['acme/android-app', 'g/docs'] },
       );
       expect(found.targets.map((t) => t.project)).toEqual(['g/docs']);
     });
