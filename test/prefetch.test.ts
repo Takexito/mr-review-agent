@@ -54,7 +54,7 @@ function fakeOpen(reply: (call: Call) => ToolResult | Error) {
 }
 
 async function deps(open: ReturnType<typeof fakeOpen>['open']) {
-  return { connectors, open, imagesDir: await mkdtemp(join(tmpdir(), 'prefetch-')), log };
+  return { connectors, open, imagesDir: await mkdtemp(join(tmpdir(), 'prefetch-')), log, timeoutMs: 60_000 };
 }
 
 describe('prefetchTargets', () => {
@@ -148,5 +148,30 @@ describe('prefetchTargets', () => {
     expect(saved?.startsWith(d.imagesDir)).toBe(true);
     expect(saved?.endsWith('.png')).toBe(true);
     expect((await readFile(saved!)).toString()).toBe('fake-png');
+  });
+
+  it('should stop at the shared time limit, report the rest and close the hanging connector', async () => {
+    let calls = 0;
+    const closed: string[] = [];
+    const open = async ({ name }: NamedConnector): Promise<ConnectorSession> => ({
+      call: async () => {
+        calls += 1;
+        // Первый вызов отвечает, второй висит: так ведёт себя зависший сервер коннектора.
+        return calls === 1 ? text('ok') : new Promise<ToolResult>(() => undefined);
+      },
+      close: async () => {
+        closed.push(name);
+      },
+    });
+    const third: DirectTarget = { ...prj, label: 'PRJ-3' };
+
+    const result = await prefetchTargets([prj, { ...prj, label: 'PRJ-2' }, third], { ...(await deps(open)), timeoutMs: 50 });
+
+    expect(result.fetched.map((f) => f.target.label)).toEqual(['PRJ-137']);
+    expect(result.degraded.join('\n')).toContain('PRJ-2');
+    expect(result.degraded.join('\n')).toContain('PRJ-3');
+    expect(result.degraded.join('\n')).toContain('лимит');
+    expect(calls).toBe(2);
+    expect(closed).toEqual(['linear']);
   });
 });

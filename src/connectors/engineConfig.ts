@@ -1,4 +1,5 @@
 import type { ConnectorConfig } from '../config/schema.js';
+import type { CliTool } from '../config.js';
 
 export interface NamedConnector {
   readonly name: string;
@@ -40,7 +41,12 @@ export function codexMcpOverrides(connectors: readonly NamedConnector[]): string
 export interface AgentAccess {
   readonly connectors: readonly NamedConnector[];
   readonly agentNetwork: boolean;
-  readonly cliTools: readonly string[];
+  readonly cliTools: readonly CliTool[];
+}
+
+/** Окружение CLI-инструментов профиля; пересечения имён и служебные переменные отсекает схема `service.yaml`. */
+export function cliToolsEnv(access: AgentAccess | undefined): Record<string, string> {
+  return Object.assign({}, ...(access?.cliTools ?? []).map((t) => t.env)) as Record<string, string>;
 }
 
 export const NO_ACCESS: AgentAccess = { connectors: [], agentNetwork: false, cliTools: [] };
@@ -71,6 +77,6 @@ export function claudeAllowedTools(base: readonly string[], access: AgentAccess)
     else tools.push(`mcp__${name}`);
   }
   if (access.agentNetwork) tools.push('WebFetch', 'WebSearch');
-  tools.push(...access.cliTools.map((t) => `Bash(${t} *)`));
+  tools.push(...access.cliTools.map((t) => `Bash(${t.name} *)`));
   return tools;
 }

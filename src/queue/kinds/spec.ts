@@ -7,7 +7,10 @@ import { postRawReview } from '../../gitlab/postReview.js';
 import { degradedLines, postSpecReview, SPEC_HEADING, SPEC_NOT_RUN, uncoveredTargets } from '../../gitlab/postSpecReview.js';
 import { downloadImages, imageDegraded, imageHint } from '../../gitlab/uploads.js';
 import { prefetchTargets } from '../../spec/prefetch.js';
-import { findDirectTargets, GITLAB_ISSUE_PREFIX } from '../../spec/targets.js';
+import { findDirectTargets, GITLAB_ISSUE_PREFIX, type DirectTarget } from '../../spec/targets.js';
+import type { AppConfig, ProjectProfile } from '../../config.js';
+import type { MrDetails } from '../../gitlab/mr.js';
+import type { JobData } from '../job.js';
 import { safeFileName } from '../../util/fileName.js';
 import { mergeCoverage, type AgentRerun } from './completion.js';
 import { buildCoverage, logCoverage, type KindContext, type KindHandler } from './shared.js';
@@ -23,10 +26,24 @@ export type SpecAxis =
       complete(review: SpecReview, rerun: AgentRerun | undefined): Promise<SpecReview>;
     };
 
-function howToSetTarget(ctx: KindContext, prefixes: readonly string[]): string {
+/** Без `jobDir` и чекаутов: процессор ищет цели до выкладки, см. `specSkipNote`. */
+export interface SpecTargetInput {
+  readonly config: Pick<AppConfig, 'gitlabHost' | 'bindings'>;
+  readonly data: JobData;
+  readonly mr: Pick<MrDetails, 'title' | 'sourceBranch' | 'description'>;
+  readonly profile: ProjectProfile | undefined;
+  /** См. `KindContext.allowedProjects`. */
+  readonly allowedProjects: readonly string[];
+}
+
+type SpecTargets =
+  | { readonly state: 'skipped'; readonly reason: string; readonly degraded: readonly string[] }
+  | { readonly state: 'found'; readonly targets: readonly DirectTarget[]; readonly degraded: readonly string[] };
+
+function howToSetTarget(input: SpecTargetInput, prefixes: readonly string[]): string {
   const keyPrefix = prefixes.find((p) => p !== GITLAB_ISSUE_PREFIX);
   const example = keyPrefix ? `${keyPrefix}-123` : '#34';
-  const handle = ctx.config.bindings.find((b) => b.engine === ctx.data.engine)?.handle ?? ctx.data.engine;
+  const handle = input.config.bindings.find((b) => b.engine === input.data.engine)?.handle ?? input.data.engine;
   const kinds = prefixes.map((p) => (p === GITLAB_ISSUE_PREFIX ? '`#…` (задача GitLab)' : `\`${p}-…\``)).join(', ');
   return (
     `Прямая цель не найдена. Укажите ключ задачи (${kinds}) в заголовке MR, в имени ветки, ` +
@@ -34,14 +51,13 @@ function howToSetTarget(ctx: KindContext, prefixes: readonly string[]): string {
   );
 }
 
-/** Находит и скачивает прямые цели, строит промпт оси — общее для команды `spec` и общего `review`. */
-export async function prepareSpecAxis(ctx: KindContext): Promise<SpecAxis> {
-  const { config, data, mr, jlog, degraded, contextHints } = ctx;
-  if (!ctx.profile) return { state: 'skipped', reason: 'Проект больше не входит ни в один профиль `service.yaml`.' };
-  const { issueKeys } = ctx.profile;
+function findSpecTargets(input: SpecTargetInput): SpecTargets {
+  const { config, data, mr, profile } = input;
+  if (!profile) return { state: 'skipped', reason: 'Проект больше не входит ни в один профиль `service.yaml`.', degraded: [] };
+  const { issueKeys } = profile;
   const prefixes = Object.keys(issueKeys);
   if (prefixes.length === 0) {
-    return { state: 'skipped', reason: 'В профиле проекта не настроены `issueKeys` — прямые цели MR не определяются.' };
+    return { state: 'skipped', reason: 'В профиле проекта не настроены `issueKeys` — прямые цели MR не определяются.', degraded: [] };
   }
 
   const found = findDirectTargets(
@@ -50,22 +66,40 @@ export async function prepareSpecAxis(ctx: KindContext): Promise<SpecAxis> {
       issueKeys,
       gitlabHost: config.gitlabHost,
       projectPath: data.projectPath,
-      allowedProjects: ctx.allowedProjects,
+      allowedProjects: input.allowedProjects,
     },
   );
-  for (const label of found.foreign) {
-    degraded.push(`Задача \`${label}\` — из проекта вне профиля (не этот и не смежный репозиторий): бот её не читает.`);
-  }
-  for (const token of found.unmatched) {
-    degraded.push(`\`${token}\` из команды не подходит ни под один префикс задач профиля (${prefixes.join(', ')}).`);
-  }
-  if (found.targets.length === 0) return { state: 'skipped', reason: howToSetTarget(ctx, prefixes) };
+  const degraded = [
+    ...found.foreign.map((label) => `Задача \`${label}\` — из проекта вне профиля (не этот и не смежный репозиторий): бот её не читает.`),
+    ...found.unmatched.map((token) => `\`${token}\` из команды не подходит ни под один префикс задач профиля (${prefixes.join(', ')}).`),
+  ];
+  if (found.targets.length === 0) return { state: 'skipped', reason: howToSetTarget(input, prefixes), degraded };
+  return { state: 'found', targets: found.targets, degraded };
+}
+
+function skipNote(reason: string, degraded: readonly string[]): string {
+  return [SPEC_HEADING, '', `${SPEC_NOT_RUN} ${reason}`, ...degradedLines(degraded)].join('\n');
+}
+
+/** Заметка-отказ команды `spec` без прямой цели; null — цели есть. */
+export function specSkipNote(input: SpecTargetInput): string | null {
+  const found = findSpecTargets(input);
+  return found.state === 'skipped' ? skipNote(found.reason, found.degraded) : null;
+}
+
+/** Находит и скачивает прямые цели, строит промпт оси — общее для команды `spec` и общего `review`. */
+export async function prepareSpecAxis(ctx: KindContext): Promise<SpecAxis> {
+  const { config, data, mr, jlog, degraded, contextHints } = ctx;
+  const found = findSpecTargets(ctx);
+  degraded.push(...found.degraded);
+  if (found.state === 'skipped') return { state: 'skipped', reason: found.reason };
 
   const prefetched = await prefetchTargets(found.targets, {
     connectors: config.connectors,
     open: ctx.openConnector,
     imagesDir: ctx.imagesDir,
     log: jlog,
+    timeoutMs: config.prefetchTimeoutMs,
   });
   degraded.push(...prefetched.degraded);
   jlog.info({ found: found.targets.map((t) => t.label), fetched: prefetched.fetched.map((f) => f.target.label) }, 'direct targets');
@@ -89,6 +123,7 @@ export async function prepareSpecAxis(ctx: KindContext): Promise<SpecAxis> {
       project: target.project,
       allowedProjects: ctx.allowedProjects,
       prefix: `target-${safeFileName(target.label)}`,
+      attachments: config.connectors[target.connector]?.attachments,
     });
     hints.push(...imageHint(`цели ${target.label}`, images));
     degraded.push(...imageDegraded(`цели ${target.label}`, images));
@@ -140,7 +175,7 @@ export const prepareSpec: KindHandler = async (ctx) => {
   const { data, mr, diff, api, jlog, linkify, degraded } = ctx;
   const axis = await prepareSpecAxis(ctx);
   if (axis.state === 'skipped') {
-    return { skipNote: [SPEC_HEADING, '', `${SPEC_NOT_RUN} ${axis.reason}`, ...degradedLines(degraded)].join('\n') };
+    return { skipNote: skipNote(axis.reason, degraded) };
   }
 
   return {

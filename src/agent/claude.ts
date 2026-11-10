@@ -3,7 +3,7 @@ import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { AppConfig } from '../config.js';
 import type { Agent } from './types.js';
-import { claudeAllowedTools, claudeMcpConfig, NO_ACCESS, type NamedConnector } from '../connectors/engineConfig.js';
+import { claudeAllowedTools, claudeMcpConfig, cliToolsEnv, NO_ACCESS, type NamedConnector } from '../connectors/engineConfig.js';
 import { AgentAuthError, AgentRateLimitError, AgentRunError } from './types.js';
 import { agentEnv } from './env.js';
 import { parseClaudeStream, type ToolCall } from './journal.js';
@@ -128,7 +128,7 @@ export function createClaudeAgent(config: AppConfig): Agent {
           input: prompt,
           // Явный allowlist вместо `...process.env`: токены ботов и коннекторов в окружение
           // claude не попадают — коннекторы получают свои через mcp.json.
-          env: agentEnv(process.env, { CLAUDE_CODE_OAUTH_TOKEN: config.claudeOauthToken }),
+          env: agentEnv(process.env, { ...cliToolsEnv(access), CLAUDE_CODE_OAUTH_TOKEN: config.claudeOauthToken }),
           extendEnv: false,
         });
         return extractClaudeResult(result.stdout, journal);

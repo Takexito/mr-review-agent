@@ -32,7 +32,7 @@ import { checkoutRelated, type RelatedCheckout, type RelatedResult } from '../re
 import { prepareAsk } from './kinds/ask.js';
 import { prepareBugs } from './kinds/bugs.js';
 import { prepareReview } from './kinds/review.js';
-import { prepareSpec } from './kinds/spec.js';
+import { prepareSpec, specSkipNote } from './kinds/spec.js';
 import { prepareStandards } from './kinds/standards.js';
 import type { KindHandler } from './kinds/shared.js';
 import type { JobKind } from './job.js';
@@ -85,7 +85,7 @@ function accessHints(access: AgentAccess): string[] {
     config.hint ? [`MCP-сервер \`${name}\`: ${config.hint}`] : [],
   );
   if (access.cliTools.length > 0) {
-    hints.push(`Доступные CLI-инструменты: ${access.cliTools.map((t) => `\`${t}\``).join(', ')}.`);
+    hints.push(`Доступные CLI-инструменты: ${access.cliTools.map((t) => `\`${t.name}\``).join(', ')}.`);
   }
   return hints;
 }
@@ -214,6 +214,14 @@ export function createProcessor(
     }
     jlog.info({ mode: diff.mode, files: diff.files.length, lines: diff.linesChanged }, 'diff ready');
 
+    const allowedProjects = [data.projectPath, ...(profile?.related ?? []).map((r) => r.project)];
+    const specSkip = data.kind === 'SPEC' ? specSkipNote({ config, data, mr, profile, allowedProjects }) : null;
+    if (specSkip !== null) {
+      await api.MergeRequestNotes.create(data.projectId, data.mrIid, specSkip);
+      jlog.info('no direct target, agent not started');
+      return;
+    }
+
     const jobDir = await createJobDir();
     const worktree = await addWorktreeAt(cacheDir, mr.headSha, join(jobDir, 'repo'));
     let relatedCheckouts: RelatedResult | null = null;
@@ -231,7 +239,6 @@ export function createProcessor(
       // Создаём заранее: `--add-dir` у claude принимает только существующий каталог.
       const imagesDir = join(jobDir, 'images');
       await mkdir(imagesDir, { recursive: true });
-      const allowedProjects = [data.projectPath, ...(profile?.related ?? []).map((r) => r.project)];
       const mrImages = await downloadImages(mr.description, {
         host: config.gitlabHost,
         token: config.gitlabToken,

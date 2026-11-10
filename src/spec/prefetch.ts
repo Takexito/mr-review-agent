@@ -25,6 +25,8 @@ export interface PrefetchDeps {
   /** Куда сохранять картинки из ответа инструмента. */
   readonly imagesDir: string;
   readonly log: Logger;
+  /** На вызовы инструментов всех целей вместе с запуском серверов; картинки целей — вне его. */
+  readonly timeoutMs: number;
 }
 
 function fillTemplate(template: Readonly<Record<string, string>>, target: DirectTarget): Record<string, string> {
@@ -63,6 +65,22 @@ function reason(text: string): string {
   return clean.length > MAX_REASON_CHARS ? `${clean.slice(0, MAX_REASON_CHARS)}…` : clean;
 }
 
+const TIMED_OUT = Symbol('timed out');
+/** Закрытие зависшего сервера тоже может зависнуть — дольше джобу не держим. */
+const CLOSE_TIMEOUT_MS = 5_000;
+
+async function within<T>(promise: Promise<T>, ms: number): Promise<T | typeof TIMED_OUT> {
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<typeof TIMED_OUT>((resolve) => {
+    timer = setTimeout(() => resolve(TIMED_OUT), ms);
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function errorReason(error: unknown): string {
   return reason(error instanceof Error ? error.message : String(error));
 }
@@ -86,8 +104,10 @@ export async function prefetchTargets(targets: readonly DirectTarget[], deps: Pr
   if (targets.length > MAX_TARGETS) {
     degraded.push(`Прямых целей больше ${MAX_TARGETS} — не скачаны: ${targets.slice(MAX_TARGETS).map((t) => t.label).join(', ')}.`);
   }
+  const deadline = Date.now() + deps.timeoutMs;
+  const queue = targets.slice(0, MAX_TARGETS);
   try {
-    for (const target of targets.slice(0, MAX_TARGETS)) {
+    for (const [index, target] of queue.entries()) {
       const rule = deps.connectors[target.connector]?.prefetch;
       const fail = (why: string): void => {
         degraded.push(`Цель ${target.label} не скачалась (${target.connector}): ${why}`);
@@ -97,7 +117,15 @@ export async function prefetchTargets(targets: readonly DirectTarget[], deps: Pr
         continue;
       }
       try {
-        const result = await (await session(target.connector)).call(rule.tool, fillTemplate(rule.arguments, target));
+        const call = session(target.connector).then((s) => s.call(rule.tool, fillTemplate(rule.arguments, target)));
+        call.catch(() => undefined);
+        const result = await within(call, Math.max(0, deadline - Date.now()));
+        if (result === TIMED_OUT) {
+          const rest = queue.slice(index).map((t) => t.label);
+          deps.log.warn({ targets: rest, timeoutMs: deps.timeoutMs }, 'target prefetch time limit reached');
+          degraded.push(`Не скачаны: ${rest.join(', ')} — истёк общий лимит предзагрузки (${Math.round(deps.timeoutMs / 1000)} с).`);
+          break;
+        }
         if (result.isError) {
           fail(reason(result.text) || `инструмент ${rule.tool} вернул ошибку`);
           continue;
@@ -114,9 +142,10 @@ export async function prefetchTargets(targets: readonly DirectTarget[], deps: Pr
       }
     }
   } finally {
-    for (const opened of sessions.values()) {
-      await opened.then((s) => s.close()).catch(() => undefined);
-    }
+    // Цепочка `then(close)` живёт и после `within`: сервер, поднявшийся позже, всё равно закроется.
+    await Promise.all(
+      [...sessions.values()].map((opened) => within(opened.then((s) => s.close()), CLOSE_TIMEOUT_MS).catch(() => undefined)),
+    );
   }
   return { fetched, degraded };
 }

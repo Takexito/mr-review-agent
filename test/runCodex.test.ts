@@ -135,6 +135,13 @@ describe('runCodex: окружение по allowlist', () => {
     expect(opts.extendEnv).toBe(false);
   });
 
+  it('кладёт в окружение агента переменные CLI-инструментов профиля', async () => {
+    const glab = { name: 'glab', env: { GITLAB_TOKEN: 'glpat-cli' } };
+    await runCodex('p', { cwd: '/tmp/wt', config, access: { ...NO_ACCESS, agentNetwork: true, cliTools: [glab] } });
+    expect(envOf(0).GITLAB_TOKEN).toBe('glpat-cli');
+    expect(envOf(0).CODEX_HOME).toBe('/data/codex');
+  });
+
   it('не кладёт секреты коннекторов в окружение агента: они уходят в MCP-процесс', async () => {
     await runCodex('p', { cwd: '/tmp/wt', config, access: { ...NO_ACCESS, connectors: [linear] } });
     expect(Object.values(envOf(0))).not.toContain('lin_secret');

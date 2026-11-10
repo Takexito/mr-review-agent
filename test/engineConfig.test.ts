@@ -57,7 +57,7 @@ describe('claudeAllowedTools', () => {
   });
 
   it('should add web tools with agentNetwork and a Bash rule per cli tool', () => {
-    const tools = claudeAllowedTools(base, { connectors: [], agentNetwork: true, cliTools: ['glab'] });
+    const tools = claudeAllowedTools(base, { connectors: [], agentNetwork: true, cliTools: [{ name: 'glab', env: {} }] });
     expect(tools).toEqual(['Read', 'Grep', 'WebFetch', 'WebSearch', 'Bash(glab *)']);
   });
 });

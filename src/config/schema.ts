@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { RESERVED_AGENT_ENV } from '../agent/env.js';
 
 export const ENGINE_NAMES = ['codex', 'claude'] as const;
 
@@ -8,6 +9,9 @@ export const CONNECTOR_NAME_PATTERN = '[A-Za-z0-9-]+';
 const CONNECTOR_NAME = new RegExp(`^${CONNECTOR_NAME_PATTERN}$`);
 // Значение уходит в `Bash(<tool> *)` у claude: `*` или пробел открыли бы любую команду.
 const CLI_TOOL_NAME = /^[A-Za-z0-9._-]+$/;
+const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+// Сравнивается с `URL.hostname` целиком: шаблон или схема в строке тихо не совпали бы ни с чем.
+const HOST_NAME = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/;
 // Префикс ключа задачи (`PRJ` в `PRJ-137`) или `#` — задачи GitLab, см. `findDirectTargets`.
 const ISSUE_KEY_PREFIX = /^(#|[A-Z][A-Z0-9]{0,9})$/;
 // Путь уходит в URL клона и в имя каталога рядом с worktree: `..` вывел бы его за каталог джобы.
@@ -76,6 +80,21 @@ export function buildServiceSchema(env: Env) {
     .transform((raw, ctx) => (raw.startsWith(SECRET_PREFIX) ? resolveSecret(raw, env, ctx) : raw));
 
   const bot = z.object({ username: z.string().min(1), token: secret }).strict();
+
+  const cliToolName = z.string().regex(CLI_TOOL_NAME, 'имя команды без шаблонов и пробелов');
+  // Переменные уходят в окружение самого агента: всё, что в них лежит, агент может прочитать и отправить наружу.
+  const cliToolEnv = z.record(maybeSecret).superRefine((vars, ctx) => {
+    for (const name of Object.keys(vars)) {
+      if (!ENV_NAME.test(name)) ctx.addIssue({ code: z.ZodIssueCode.custom, path: [name], message: 'имя переменной окружения' });
+      else if (RESERVED_AGENT_ENV.has(name)) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: [name], message: `${name} бот задаёт агенту сам` });
+      }
+    }
+  });
+  const cliTool = z.union([
+    cliToolName.transform((name) => ({ name, env: {} as Record<string, string> })),
+    z.object({ name: cliToolName, env: cliToolEnv.default({}) }).strict(),
+  ]);
   const timeoutMs = z.number().int().positive().default(DEFAULT_TIMEOUT_MS);
 
   const connector = z
@@ -91,6 +110,13 @@ export function buildServiceSchema(env: Env) {
         .object({ tool: z.string().min(1), arguments: z.record(z.string()).default({}) })
         .strict()
         .optional(),
+      attachments: z
+        .object({
+          hosts: z.array(z.string().regex(HOST_NAME, 'имя хоста без схемы, пути и шаблонов')).min(1),
+          headers: z.record(maybeSecret).default({}),
+        })
+        .strict()
+        .optional(),
     })
     .strict()
     .refine((c) => (c.command === undefined) !== (c.url === undefined), {
@@ -104,7 +130,7 @@ export function buildServiceSchema(env: Env) {
       engines: z.array(z.enum(ENGINE_NAMES)).min(1).optional(),
       connectors: z.array(z.string()).default([]),
       agentNetwork: z.boolean().default(false),
-      cliTools: z.array(z.string().regex(CLI_TOOL_NAME, 'имя команды без шаблонов и пробелов')).default([]),
+      cliTools: z.array(cliTool).default([]),
       related: z.array(RELATED_REPO).default([]),
       relatedAllowlist: z.array(z.string().min(1)).default([]),
       issueKeys: z.record(z.string()).default({}),
@@ -136,6 +162,7 @@ export function buildServiceSchema(env: Env) {
           maxDiffLines: z.number().int().positive().default(20_000),
           // Выше порога прямые цели уходят агенту файлами, а не текстом промпта.
           targetsInlineMaxChars: z.number().int().positive().default(60_000),
+          prefetchTimeoutMs: z.number().int().positive().default(300_000),
           coverageFollowup: z
             .object({
               runs: z.number().int().nonnegative().default(5),
@@ -227,6 +254,19 @@ export function buildServiceSchema(env: Env) {
             ctx.addIssue({ code: z.ZodIssueCode.custom, path, message: `коннектор ${connector} не подключён к профилю` });
           } else if (!config.connectors[connector]?.prefetch) {
             ctx.addIssue({ code: z.ZodIssueCode.custom, path, message: `у коннектора ${connector} нет правила prefetch` });
+          }
+        }
+        const variables = new Set<string>();
+        for (const tool of p.cliTools) {
+          for (const name of Object.keys(tool.env)) {
+            if (variables.has(name)) {
+              ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                path: ['profiles', i, 'cliTools'],
+                message: `переменную ${name} задают два инструмента`,
+              });
+            }
+            variables.add(name);
           }
         }
         if (p.cliTools.length > 0 && !p.agentNetwork) {

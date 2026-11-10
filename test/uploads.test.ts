@@ -65,4 +65,55 @@ describe('downloadImages', () => {
     expect(String(second[0])).toBe('https://storage.example/signed');
     expect(JSON.stringify(second[1]?.headers ?? {})).not.toContain('secret');
   });
+
+  describe('attachments of a connector on its own host', () => {
+    const linear = { hosts: ['uploads.linear.app'], headers: { Authorization: 'lin_api_key' } };
+    const url = 'https://uploads.linear.app/ws/abc/def/screen.png';
+
+    it('should download them with the connector headers and save next to the others', async () => {
+      const mock = vi.fn(async (_input: string | URL, _init?: RequestInit) => new Response('img', { status: 200 }));
+      vi.stubGlobal('fetch', mock);
+      const cfg = await config();
+
+      const result = await downloadImages(`![s](${url})`, { ...cfg, attachments: linear });
+
+      expect(String(mock.mock.calls[0]![0])).toBe(url);
+      expect(mock.mock.calls[0]![1]?.headers).toEqual({ Authorization: 'lin_api_key' });
+      expect(result.foreign).toBe(0);
+      expect(result.saved[0]!.path.startsWith(cfg.dir)).toBe(true);
+      expect(result.saved[0]!.path).toContain('screen.png');
+    });
+
+    it('should not send the headers over plain http or to another host, and not along a redirect', async () => {
+      const mock = vi.fn(async (input: string | URL, _init?: RequestInit) =>
+        String(input) === url
+          ? new Response(null, { status: 302, headers: { location: 'https://cdn.example/signed' } })
+          : new Response('img', { status: 200 }),
+      );
+      vi.stubGlobal('fetch', mock);
+
+      const result = await downloadImages(
+        `![a](http://uploads.linear.app/x.png) ![b](https://uploads.linear.app.evil.example/x.png) ![c](${url})`,
+        { ...(await config()), attachments: linear },
+      );
+
+      expect(result.foreign).toBe(2);
+      expect(mock).toHaveBeenCalledTimes(2);
+      expect(String(mock.mock.calls[1]![0])).toBe('https://cdn.example/signed');
+      expect(JSON.stringify(mock.mock.calls[1]![1]?.headers ?? {})).not.toContain('lin_api_key');
+    });
+
+    it('should keep own GitLab uploads under the project check even when the host is listed, and ignore other ports', async () => {
+      const mock = vi.fn();
+      vi.stubGlobal('fetch', mock);
+
+      const result = await downloadImages(
+        `![a](${HOST}/secret/vault/uploads/${SECRET}/a.png) ![b](https://uploads.linear.app:8443/x.png)`,
+        { ...(await config()), attachments: { hosts: ['gitlab.com', 'uploads.linear.app'], headers: { Authorization: 'k' } } },
+      );
+
+      expect(result.foreign).toBe(2);
+      expect(mock).not.toHaveBeenCalled();
+    });
+  });
 });

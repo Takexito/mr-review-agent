@@ -12,6 +12,12 @@ export interface ImageDownloadConfig {
   readonly allowedProjects: readonly string[];
   /** Префикс имён файлов: разводит картинки описания MR и разных целей. */
   readonly prefix: string;
+  readonly attachments?: ConnectorAttachments | undefined;
+}
+
+export interface ConnectorAttachments {
+  readonly hosts: readonly string[];
+  readonly headers: Readonly<Record<string, string>>;
 }
 
 export interface SavedImage {
@@ -64,19 +70,52 @@ function parseUpload(raw: string, host: string, project: string): UploadLink | '
   return null;
 }
 
-async function request(config: ImageDownloadConfig, apiPath: string): Promise<Response> {
+/** Что и с какими заголовками скачать; `url` — как ссылка записана в тексте. */
+interface Download {
+  readonly url: string;
+  readonly fetchUrl: string;
+  readonly headers: Readonly<Record<string, string>>;
+  readonly filename: string;
+}
+
+/**
+ * Только https, точное совпадение хоста и порт по умолчанию: иначе заголовки коннектора ушли бы в
+ * открытом виде или чужому сервису. Свой GitLab — никогда: его вложения проходят проверку проекта.
+ */
+function attachmentDownload(raw: string, config: ImageDownloadConfig): Download | null {
+  const { attachments } = config;
+  if (!attachments) return null;
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== 'https:' || url.port !== '' || !attachments.hosts.includes(url.hostname)) return null;
+  if (url.hostname === new URL(config.host).hostname) return null;
+  let filename: string;
+  try {
+    filename = basename(decodeURIComponent(url.pathname)) || 'attachment';
+  } catch {
+    return null;
+  }
+  return { url: raw, fetchUrl: url.href, headers: attachments.headers, filename };
+}
+
+function uploadDownload(url: string, link: UploadLink, config: ImageDownloadConfig): Download {
   const origin = new URL(config.host).origin;
+  const apiPath = `/projects/${encodeURIComponent(link.project)}/uploads/${link.secret}/${encodeURIComponent(link.filename)}`;
+  return { url, fetchUrl: `${origin}/api/v4${apiPath}`, headers: { 'PRIVATE-TOKEN': config.token }, filename: link.filename };
+}
+
+async function request(download: Download): Promise<Response> {
   const signal = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
   // Вложения отдаются через объектное хранилище на другом хосте: при автоследовании
-  // редиректа fetch донёс бы туда и заголовок PRIVATE-TOKEN.
-  const first = await fetch(`${origin}/api/v4${apiPath}`, {
-    headers: { 'PRIVATE-TOKEN': config.token },
-    redirect: 'manual',
-    signal,
-  });
+  // редиректа fetch донёс бы туда и заголовок с токеном.
+  const first = await fetch(download.fetchUrl, { headers: { ...download.headers }, redirect: 'manual', signal });
   const location = first.headers.get('location');
   if (first.status >= 300 && first.status < 400 && location) {
-    return fetch(new URL(location, origin), { signal });
+    return fetch(new URL(location, download.fetchUrl), { signal });
   }
   return first;
 }
@@ -91,24 +130,27 @@ export async function downloadImages(markdown: string, config: ImageDownloadConf
   const saved: SavedImage[] = [];
   const failed: string[] = [];
   let foreign = 0;
-  const uploads: { url: string; link: UploadLink }[] = [];
+  const uploads: Download[] = [];
   for (const url of imageUrls(markdown)) {
+    const attachment = attachmentDownload(url, config);
+    if (attachment) {
+      uploads.push(attachment);
+      continue;
+    }
     const link = parseUpload(url, config.host, config.project);
     if (link === 'foreign' || (link && !config.allowedProjects.includes(link.project))) foreign += 1;
-    else if (link) uploads.push({ url, link });
+    else if (link) uploads.push(uploadDownload(url, link, config));
   }
   if (uploads.length > MAX_IMAGES) {
     failed.push(`картинок больше ${MAX_IMAGES} — скачаны первые ${MAX_IMAGES}`);
   }
 
-  for (const [i, { url, link }] of uploads.slice(0, MAX_IMAGES).entries()) {
+  for (const [i, download] of uploads.slice(0, MAX_IMAGES).entries()) {
+    const { url } = download;
     try {
-      const response = await request(
-        config,
-        `/projects/${encodeURIComponent(link.project)}/uploads/${link.secret}/${encodeURIComponent(link.filename)}`,
-      );
+      const response = await request(download);
       if (!response.ok) {
-        failed.push(`${url}: GitLab ответил ${response.status}`);
+        failed.push(`${url}: сервер ответил ${response.status}`);
         continue;
       }
       const bytes = new Uint8Array(await response.arrayBuffer());
@@ -118,7 +160,7 @@ export async function downloadImages(markdown: string, config: ImageDownloadConf
       }
       await mkdir(config.dir, { recursive: true });
       // Префикс и номер разводят одноимённые вложения.
-      const path = join(config.dir, `${config.prefix}-${i + 1}-${safeFileName(basename(link.filename))}`);
+      const path = join(config.dir, `${config.prefix}-${i + 1}-${safeFileName(basename(download.filename))}`);
       await writeFile(path, bytes);
       saved.push({ url, path });
     } catch (error) {

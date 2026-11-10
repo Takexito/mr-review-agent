@@ -34,6 +34,9 @@ const INHERITED = [
   'XDG_CONFIG_HOME',
 ] as const;
 
+/** Переменные, которые бот задаёт агенту сам: подмена любой из них ломает запуск или подписку. */
+export const RESERVED_AGENT_ENV: ReadonlySet<string> = new Set([...INHERITED, 'CODEX_HOME', 'CLAUDE_CODE_OAUTH_TOKEN']);
+
 /**
  * Собирает окружение агента: базовое из `source` + явные добавки.
  * Значения `undefined` в `extra` отбрасываются, чтобы не плодить пустые переменные.

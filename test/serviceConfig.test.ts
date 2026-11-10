@@ -137,6 +137,52 @@ describe('parseServiceConfig', () => {
     expect(errorOf(() => parseServiceConfig(yaml, ENV))).toContain('cliTools');
   });
 
+  it('should give a cli tool its environment with secrets resolved, and a bare name an empty one', () => {
+    const yaml = `${MINIMAL}    agentNetwork: true
+    cliTools:
+      - jq
+      - { name: glab, env: { GITLAB_TOKEN: secret:LINEAR_KEY, GITLAB_HOST: gitlab.example.com } }
+`;
+    expect(parseServiceConfig(yaml, ENV).profiles[0]!.cliTools).toEqual([
+      { name: 'jq', env: {} },
+      { name: 'glab', env: { GITLAB_TOKEN: 'lin_api_x', GITLAB_HOST: 'gitlab.example.com' } },
+    ]);
+  });
+
+  it('should reject a cli tool variable that would replace what the agent itself runs on', () => {
+    for (const name of ['PATH', 'HOME', 'CODEX_HOME', 'CLAUDE_CODE_OAUTH_TOKEN']) {
+      const yaml = `${MINIMAL}    agentNetwork: true
+    cliTools: [{ name: glab, env: { ${name}: x } }]
+`;
+      expect(errorOf(() => parseServiceConfig(yaml, ENV))).toContain(name);
+    }
+  });
+
+  it('should reject two cli tools of a profile setting the same variable', () => {
+    const yaml = `${MINIMAL}    agentNetwork: true
+    cliTools: [{ name: glab, env: { TOKEN: a } }, { name: gh, env: { TOKEN: b } }]
+`;
+    expect(errorOf(() => parseServiceConfig(yaml, ENV))).toContain('TOKEN');
+  });
+
+  it('should read attachment hosts of a connector with secret headers', () => {
+    const yaml = MINIMAL.replace(
+      'profiles:',
+      'connectors:\n  linear:\n    command: npx\n    attachments: { hosts: [uploads.linear.app], headers: { Authorization: secret:LINEAR_KEY } }\nprofiles:',
+    );
+    expect(parseServiceConfig(yaml, ENV).connectors['linear']!.attachments).toEqual({
+      hosts: ['uploads.linear.app'],
+      headers: { Authorization: 'lin_api_x' },
+    });
+  });
+
+  it('should reject an attachment host that is a URL or pattern rather than a host name', () => {
+    for (const host of ['https://uploads.linear.app', '*.linear.app', 'uploads.linear.app/x']) {
+      const yaml = MINIMAL.replace('profiles:', `connectors:\n  linear:\n    command: npx\n    attachments: { hosts: ["${host}"] }\nprofiles:`);
+      expect(errorOf(() => parseServiceConfig(yaml, ENV))).toContain('attachments');
+    }
+  });
+
   it('should read related repositories of a profile with ref defaulting to the default branch', () => {
     const yaml = `${MINIMAL}    related:\n      - { project: acme/docs, hint: Контракты API }\n      - { project: acme/backend, ref: same-branch }\n`;
     const config = parseServiceConfig(yaml, ENV);

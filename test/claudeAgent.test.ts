@@ -103,6 +103,16 @@ describe('createClaudeAgent.run: read-only, промпт через stdin', () =
     }
   });
 
+  it('кладёт в окружение claude переменные CLI-инструментов и разрешает их команды', async () => {
+    const agent = createClaudeAgent(config);
+    const glab = { name: 'glab', env: { GITLAB_TOKEN: 'glpat-cli' } };
+    await agent.run('p', { cwd: '/tmp/wt', jobDir: '/tmp/job', access: { connectors: [], agentNetwork: true, cliTools: [glab] } });
+
+    const [, args, opts] = mockedExeca.mock.calls[0] as unknown as [string, string[], Record<string, unknown>];
+    expect((opts.env as Record<string, unknown>).GITLAB_TOKEN).toBe('glpat-cli');
+    expect(args[args.indexOf('--allowedTools') + 1]).toContain('Bash(glab *)');
+  });
+
   it('не добавляет --add-dir и --mcp-config, когда контекста нет', async () => {
     const agent = createClaudeAgent(config);
     await agent.run('p', { cwd: '/tmp/wt', jobDir: '/tmp/job' });

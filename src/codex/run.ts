@@ -2,7 +2,7 @@ import { writeFile } from 'node:fs/promises';
 import { execa, ExecaError } from 'execa';
 import type { AppConfig } from '../config.js';
 import { AgentAuthError, AgentRateLimitError, AgentRunError } from '../agent/types.js';
-import { codexMcpOverrides, type AgentAccess } from '../connectors/engineConfig.js';
+import { cliToolsEnv, codexMcpOverrides, type AgentAccess } from '../connectors/engineConfig.js';
 import { agentEnv } from '../agent/env.js';
 import { parseCodexEvents, type ToolCall } from '../agent/journal.js';
 
@@ -130,7 +130,7 @@ export async function runCodex(prompt: string, options: RunCodexOptions): Promis
       input: prompt,
       // Явный allowlist вместо `...process.env`: GitLab-токен и webhook-секрет в окружение
       // агента не попадают. Критично именно теперь, когда у него может быть сеть.
-      env: agentEnv(process.env, { CODEX_HOME: config.codexHome }),
+      env: agentEnv(process.env, { ...cliToolsEnv(access), CODEX_HOME: config.codexHome }),
       // execa не должен наследовать окружение поверх нашего allowlist.
       extendEnv: false,
     });

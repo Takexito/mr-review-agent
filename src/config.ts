@@ -34,12 +34,17 @@ export interface ProjectProfile {
   readonly engines: readonly EngineName[];
   readonly connectors: readonly string[];
   readonly agentNetwork: boolean;
-  readonly cliTools: readonly string[];
+  readonly cliTools: readonly CliTool[];
   readonly related: readonly RelatedRepo[];
   /** Glob по `path_with_namespace`: какие смежные репозитории может добавить `.review.yml`. */
   readonly relatedAllowlist: readonly string[];
   /** Префикс ключа задачи → коннектор, скачивающий её как прямую цель. */
   readonly issueKeys: Readonly<Record<string, string>>;
+}
+
+export interface CliTool {
+  readonly name: string;
+  readonly env: Readonly<Record<string, string>>;
 }
 
 export interface RelatedRepo {
@@ -79,6 +84,8 @@ export interface AppConfig {
   /** Порог переключения inline → agentic по числу изменённых строк. */
   readonly maxDiffLines: number;
   readonly targetsInlineMaxChars: number;
+  /** См. `PrefetchDeps.timeoutMs`. */
+  readonly prefetchTimeoutMs: number;
   readonly coverageFollowup: { readonly runs: number; readonly batch: number };
   readonly queueConcurrency: number;
   readonly redisUrl: string;
@@ -140,6 +147,7 @@ export function parseServiceConfig(yamlText: string, env: NodeJS.ProcessEnv): Ap
     maxDiffBytes: file.review.maxDiffBytes,
     maxDiffLines: file.review.maxDiffLines,
     targetsInlineMaxChars: file.review.targetsInlineMaxChars,
+    prefetchTimeoutMs: file.review.prefetchTimeoutMs,
     coverageFollowup: file.review.coverageFollowup,
     connectors: file.connectors,
     profiles: file.profiles.map((p) => ({ ...p, engines: p.engines ?? configured })),

@@ -26,6 +26,8 @@ review:
   maxDiffLines: 20000
   # Выше порога (символов) прямые цели уходят агенту файлами с оглавлением в промпте.
   targetsInlineMaxChars: 60000
+  # Общий лимит (мс) на вызовы prefetch всех прямых целей джобы: зависший сервер коннектора не держит её дольше.
+  prefetchTimeoutMs: 300000
   # Дочитывание пропущенных агентом файлов: прогонов на ось (0 — выкл.) и файлов в прогоне.
   coverageFollowup: { runs: 5, batch: 40 }
 
@@ -68,6 +70,9 @@ connectors: {}
 #    tools: [linear_getIssueById, linear_searchIssues, linear_getIssueDocuments]
 #    hint: Задачи Linear по ключу вида PRJ-137 и их документы.
 #    prefetch: { tool: linear_getIssueById, arguments: { id: "{key}" } }
+#    # Картинки этих хостов в тексте прямых целей коннектора бот качает с этими заголовками (только https,
+#    # за редиректом заголовки не идут). Без attachments такие картинки агенту недоступны.
+#    attachments: { hosts: [uploads.linear.app], headers: { Authorization: secret:LINEAR_MCP_TOKEN } }
 
 # Профили проектов: glob по path_with_namespace (* — внутри сегмента, ** — любые сегменты).
 # Побеждает первый совпавший; проект без профиля бот игнорирует.
@@ -83,7 +88,9 @@ profiles:
     # issueKeys: { PRJ: linear, "#": gitlab }
     # Сеть у самого агента: по умолчанию выкл.; cliTools — только вместе с ней.
     # agentNetwork: false
-    # cliTools: [glab]
+    # Команда или {name, env}: env уходит в окружение самого агента — токен в нём агент может увести,
+    # поэтому только на чтение. PATH, HOME, CODEX_HOME и т.п. бот задаёт сам — их переопределить нельзя.
+    # cliTools: [{ name: glab, env: { GITLAB_TOKEN: secret:GLAB_READ_TOKEN, GITLAB_HOST: gitlab.com } }]
     # Смежные репозитории (ADR 0005): полный чекаут рядом с worktree MR, только для чтения агентом.
     # ref — ветка; без него — ветка по умолчанию; same-branch — ветка с именем ветки MR, если есть.
     # Боту нужен доступ ≥Reporter; первый клон большого репозитория занимает минуты.
