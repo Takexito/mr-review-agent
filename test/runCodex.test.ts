@@ -76,7 +76,7 @@ describe('runCodex: промпт через stdin, не через argv', () => 
       readonly string[],
       Record<string, unknown>,
     ];
-    expect(args).toEqual(['exec', '--json', '--sandbox', 'read-only', '-c', 'model_reasoning_effort=xhigh', '-']);
+    expect(args).toEqual(['exec', '--json', '--sandbox', 'read-only', '-c', 'features.apps=false', '-c', 'model_reasoning_effort=xhigh', '-']);
   });
 });
 
@@ -180,6 +180,15 @@ describe('runCodex: песочница', () => {
 });
 
 describe('runCodex: коннекторы', () => {
+  it('отключает приложения ChatGPT-аккаунта при любой песочнице: это MCP вне service.yaml', async () => {
+    for (const access of [NO_ACCESS, { ...NO_ACCESS, agentNetwork: true }]) {
+      mockedExeca.mockClear();
+      await runCodex('p', { cwd: '/tmp/wt', config, access });
+      const [, args] = mockedExeca.mock.calls[0] as unknown as [string, readonly string[]];
+      expect(args[args.indexOf('features.apps=false') - 1]).toBe('-c');
+    }
+  });
+
   it('регистрирует каждый коннектор профиля через -c, не снимая песочницу', async () => {
     await runCodex('p', { cwd: '/tmp/wt', config, access: { ...NO_ACCESS, connectors: [linear] } });
 

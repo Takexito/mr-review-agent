@@ -115,6 +115,9 @@ export async function runCodex(prompt: string, options: RunCodexOptions): Promis
     ? ['exec', '--json', '--sandbox', 'workspace-write', '-c', 'sandbox_workspace_write.network_access=true']
     : ['exec', '--json', '--sandbox', needsWrite ? 'workspace-write' : 'read-only'];
 
+  // Приложения ChatGPT-аккаунта подписки (`codex_apps`) — MCP вне `service.yaml`, с пишущими
+  // инструментами и чужими токенами: агенту открыты только коннекторы профиля.
+  args.push('-c', 'features.apps=false');
   if (config.codexModel) args.push('-m', config.codexModel);
   if (config.codexReasoning) args.push('-c', `model_reasoning_effort=${config.codexReasoning}`);
   for (const override of codexMcpOverrides(access?.connectors ?? [])) args.push('-c', override);
