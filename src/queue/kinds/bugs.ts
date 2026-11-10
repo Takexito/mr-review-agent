@@ -72,6 +72,7 @@ export const prepareBugs: KindHandler = async (ctx) => {
           BUGS_HEADING,
           linkify(parseAnswerOutput(output)),
           buildCoverage(diff, null),
+          ctx.noteHeader(),
         );
         return;
       }
@@ -79,7 +80,7 @@ export const prepareBugs: KindHandler = async (ctx) => {
       const review = linkifyBugs(completed, linkify);
       const coverage = buildCoverage(diff, completed);
       logCoverage(jlog, coverage);
-      await postReview(api, data.projectId, data.mrIid, mr, review, jlog, coverage);
+      await postReview(api, data.projectId, data.mrIid, mr, review, jlog, coverage, ctx.noteHeader());
     },
   };
 };

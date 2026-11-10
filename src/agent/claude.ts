@@ -6,6 +6,7 @@ import type { Agent } from './types.js';
 import { claudeAllowedTools, claudeMcpConfig, NO_ACCESS, type NamedConnector } from '../connectors/engineConfig.js';
 import { AgentAuthError, AgentRateLimitError, AgentRunError } from './types.js';
 import { agentEnv } from './env.js';
+import { parseClaudeStream, type ToolCall } from './journal.js';
 
 /** OAuth-токен подписки протух/отозван/невалиден. */
 const AUTH_MARKERS = [
@@ -58,29 +59,25 @@ export function conciseClaudeError(stderr: string, stdout: string, shortMessage:
   return detail.length > 200 ? `${detail.slice(0, 200)}…` : detail;
 }
 
-interface ClaudeResultEnvelope {
-  readonly type?: string;
-  readonly subtype?: string;
-  readonly is_error?: boolean;
-  readonly result?: string;
-}
-
 /**
- * Извлекает текст ассистента из JSON-обёртки `claude -p --output-format json`
- * (`{ "type":"result", "is_error":false, "result":"…" }`). Если вернулся не-JSON —
- * отдаём stdout как есть (marker-парсеры разберутся/деградируют). is_error → бросаем.
+ * Достаёт текст ассистента из события `result` потока `claude -p --output-format stream-json`
+ * (`{ "type":"result", "is_error":false, "result":"…" }`). is_error → бросаем. Поток без `result`
+ * тоже ошибка: иначе в MR как «сырой ответ» ушли бы прочитанные агентом файлы и задачи.
+ * Не-JSON stdout отдаём как есть (marker-парсеры разберутся/деградируют).
  */
-export function extractClaudeResult(stdout: string): string {
-  let json: ClaudeResultEnvelope;
-  try {
-    json = JSON.parse(stdout.trim()) as ClaudeResultEnvelope;
-  } catch {
+export function extractClaudeResult(stdout: string, journal?: ToolCall[]): string {
+  const stream = parseClaudeStream(stdout);
+  journal?.push(...stream.calls);
+  const json = stream.result;
+  if (!json) {
+    if (stream.isStream) throw new AgentRunError('claude не вернул итоговое событие result');
     return stdout;
   }
-  if (json.is_error) {
-    throw new AgentRunError(`claude вернул ошибку: ${json.subtype ?? 'unknown'}`);
+  if (json['is_error']) {
+    const subtype = json['subtype'];
+    throw new AgentRunError(`claude вернул ошибку: ${typeof subtype === 'string' ? subtype : 'unknown'}`);
   }
-  return typeof json.result === 'string' ? json.result : stdout;
+  return typeof json['result'] === 'string' ? json['result'] : stdout;
 }
 
 /** `mcp.json` для `--mcp-config` в каталоге джобы (его сносит processor); внутри токены коннекторов. */
@@ -104,11 +101,13 @@ async function writeMcpConfig(jobDir: string, connectors: readonly NamedConnecto
 export function createClaudeAgent(config: AppConfig): Agent {
   return {
     name: 'claude',
-    run: async (prompt, { cwd, jobDir, readDirs, access }) => {
+    run: async (prompt, { cwd, jobDir, readDirs, access, journal }) => {
       const args = [
         '--print',
         '--output-format',
-        'json',
+        'stream-json',
+        // `-p` с `stream-json` без `--verbose` завершается ошибкой.
+        '--verbose',
         '--permission-mode',
         config.claudePermissionMode,
         '--allowedTools',
@@ -132,13 +131,18 @@ export function createClaudeAgent(config: AppConfig): Agent {
           env: agentEnv(process.env, { CLAUDE_CODE_OAUTH_TOKEN: config.claudeOauthToken }),
           extendEnv: false,
         });
-        return extractClaudeResult(result.stdout);
+        return extractClaudeResult(result.stdout, journal);
       } catch (error) {
-        // is_error из JSON-обёртки уже AgentRunError — не заворачиваем повторно.
+        // is_error из события result уже AgentRunError — не заворачиваем повторно.
         if (error instanceof AgentRunError) throw error;
         if (error instanceof ExecaError) {
           const stderr = String(error.stderr ?? '');
-          const stdout = String(error.stdout ?? '');
+          // В stdout весь поток событий, включая прочитанные агентом файлы и задачи — там «429» и
+          // «401» встречаются в коде; о сбое говорит только событие result.
+          const stream = parseClaudeStream(String(error.stdout ?? ''));
+          journal?.push(...stream.calls);
+          const result = stream.result;
+          const stdout = result ? [result['subtype'], result['result']].filter((v) => typeof v === 'string').join('\n') : '';
           const haystack = `${stderr}\n${stdout}\n${error.shortMessage}`;
           // Порядок важен: auth (401) отличаем от rate-limit — у них разные remedy.
           if (looks(haystack, AUTH_MARKERS)) {

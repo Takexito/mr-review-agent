@@ -3,6 +3,7 @@ import { createInlineDiscussion, type DiffRefs } from './inline.js';
 import type { SpecReview, SpecItem, SpecStatus } from '../codex/parseSpec.js';
 import type { Logger } from '../logger.js';
 import { coverageWarning, type DiffCoverage } from './coverage.js';
+import { withHeader } from './noteHeader.js';
 
 const STATUS_EMOJI: Record<SpecStatus, string> = {
   met: '✅',
@@ -123,8 +124,9 @@ export async function postSpecReview(
   review: SpecReview,
   log: Logger,
   opts: PostSpecOptions,
+  header: readonly string[] = [],
 ): Promise<void> {
-  await api.MergeRequestNotes.create(projectId, mrIid, buildSpecNote(review, opts));
+  await api.MergeRequestNotes.create(projectId, mrIid, withHeader(buildSpecNote(review, opts), header));
   await placeSpecInline(api, projectId, mrIid, refs, review, log, opts);
 }
 

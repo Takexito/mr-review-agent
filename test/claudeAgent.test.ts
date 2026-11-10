@@ -5,7 +5,10 @@ vi.mock('execa', () => {
   class ExecaError extends Error {}
   return {
     execa: vi.fn(async () => ({
-      stdout: JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'CLAUDE_OK' }),
+      stdout: [
+        JSON.stringify({ type: 'system', subtype: 'init' }),
+        JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'CLAUDE_OK' }),
+      ].join('\n'),
       stderr: '',
     })),
     ExecaError,
@@ -17,8 +20,9 @@ import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createClaudeAgent, extractClaudeResult } from '../src/agent/claude.js';
-import { AgentRunError } from '../src/agent/types.js';
+import { AgentRateLimitError, AgentRunError } from '../src/agent/types.js';
 import type { AppConfig } from '../src/config.js';
+import type { ToolCall } from '../src/agent/journal.js';
 
 const config = {
   claudeBin: 'claude',
@@ -57,7 +61,8 @@ describe('createClaudeAgent.run: read-only, промпт через stdin', () =
     // Read-only headless-набор флагов.
     expect(args).toContain('--print');
     expect(args).toContain('--output-format');
-    expect(args).toContain('json');
+    expect(args).toContain('stream-json');
+    expect(args).toContain('--verbose');
     expect(args).toContain('--permission-mode');
     expect(args).toContain('dontAsk');
     expect(args).toContain('--allowedTools');
@@ -167,6 +172,11 @@ describe('createClaudeAgent.run: доступ к контексту вне cwd',
 });
 
 describe('extractClaudeResult', () => {
+  it('бросает AgentRunError, когда в потоке событий нет result: иначе в MR ушёл бы сам поток', () => {
+    const stream = JSON.stringify({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't', content: 'секрет' }] } });
+    expect(() => extractClaudeResult(stream)).toThrow(AgentRunError);
+  });
+
   it('достаёт result из успешной JSON-обёртки', () => {
     expect(
       extractClaudeResult(JSON.stringify({ type: 'result', is_error: false, result: 'HELLO' })),
@@ -183,5 +193,80 @@ describe('extractClaudeResult', () => {
     expect(extractClaudeResult('=== BEGIN_REVIEW_JSON ===\n{}\n=== END_REVIEW_JSON ===')).toContain(
       'BEGIN_REVIEW_JSON',
     );
+  });
+});
+
+describe('createClaudeAgent.run: журнал вызовов коннекторов', () => {
+  const line = (e: object): string => JSON.stringify(e);
+  const toolUse = (id: string, name: string, input: object): string =>
+    line({ type: 'assistant', message: { content: [{ type: 'tool_use', id, name, input }] } });
+  const toolResult = (id: string, isError?: boolean): string =>
+    line({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: id, content: 'x', ...(isError ? { is_error: true } : {}) }] } });
+
+  it('записывает вызовы MCP-инструментов с исходом и пропускает встроенные инструменты', async () => {
+    mockedExeca.mockResolvedValueOnce({
+      stdout: [
+        toolUse('t1', 'Read', { file_path: '/x' }),
+        toolResult('t1'),
+        toolUse('t2', 'mcp__linear__get_issue', { id: 'PRJ-7' }),
+        toolUse('t3', 'mcp__linear__get_issue', { id: 'BAD-1' }),
+        toolResult('t2'),
+        toolResult('t3', true),
+        line({ type: 'result', subtype: 'success', is_error: false, result: 'OK' }),
+      ].join('\n'),
+      stderr: '',
+    } as never);
+
+    const journal: ToolCall[] = [];
+    const out = await createClaudeAgent(config).run('p', { cwd: '/tmp/wt', jobDir: '/tmp/job', journal });
+    expect(out).toBe('OK');
+    expect(journal).toEqual([
+      { server: 'linear', tool: 'get_issue', arguments: { id: 'PRJ-7' }, ok: true },
+      { server: 'linear', tool: 'get_issue', arguments: { id: 'BAD-1' }, ok: false },
+    ]);
+  });
+
+  it('считает неудачным вызов, на который результат так и не пришёл', async () => {
+    mockedExeca.mockResolvedValueOnce({
+      stdout: [toolUse('t1', 'mcp__linear__get_issue', { id: 'PRJ-7' }), line({ type: 'result', is_error: false, result: 'OK' })].join('\n'),
+      stderr: '',
+    } as never);
+
+    const journal: ToolCall[] = [];
+    await createClaudeAgent(config).run('p', { cwd: '/tmp/wt', jobDir: '/tmp/job', journal });
+    expect(journal.map((c) => c.ok)).toEqual([false]);
+  });
+});
+
+describe('createClaudeAgent.run: классификация сбоя по потоку событий', () => {
+  async function failWith(stdout: string): Promise<unknown> {
+    const { ExecaError } = await import('execa');
+    const failure = Object.assign(new (ExecaError as unknown as new (m: string) => Error)('failed'), {
+      shortMessage: 'Command failed with exit code 1',
+      stderr: '',
+      stdout,
+      exitCode: 1,
+      timedOut: false,
+    });
+    mockedExeca.mockRejectedValueOnce(failure);
+    return createClaudeAgent(config).run('p', { cwd: '/tmp/wt', jobDir: '/tmp/job' }).then(
+      () => null,
+      (e: unknown) => e,
+    );
+  }
+
+  it('не принимает «429» из прочитанного агентом файла за лимит подписки', async () => {
+    const toolOutput = JSON.stringify({
+      type: 'user',
+      message: { content: [{ type: 'tool_result', tool_use_id: 't1', content: 'if (status == 429) retryAfter() // rate limit' }] },
+    });
+    const error = await failWith([toolOutput, JSON.stringify({ type: 'result', is_error: true, subtype: 'error_during_execution' })].join('\n'));
+    expect(error).toBeInstanceOf(AgentRunError);
+    expect(error).not.toBeInstanceOf(AgentRateLimitError);
+  });
+
+  it('узнаёт лимит подписки по тексту события result', async () => {
+    const error = await failWith(JSON.stringify({ type: 'result', is_error: true, result: 'Claude AI usage limit reached' }));
+    expect(error).toBeInstanceOf(AgentRateLimitError);
   });
 });

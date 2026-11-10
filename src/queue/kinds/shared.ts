@@ -38,6 +38,8 @@ export interface KindContext {
   /** Ось дописывает сюда свои подсказки и пометки — массивы общие с прологом. */
   readonly contextHints: string[];
   readonly degraded: string[];
+  /** Строки под заголовком итоговой заметки; читать после прогонов агента — в них журнал вызовов. */
+  readonly noteHeader: () => readonly string[];
   /** Переписывает абсолютные пути worktree в тексте агента на GitLab blob-ссылки. */
   readonly linkify: (text: string) => string;
 }

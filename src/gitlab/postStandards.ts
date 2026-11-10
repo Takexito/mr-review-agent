@@ -3,6 +3,7 @@ import type { StandardsReview, Violation } from '../codex/parseStandards.js';
 import type { Logger } from '../logger.js';
 import { coverageWarning, hasGaps, type DiffCoverage } from './coverage.js';
 import { createInlineDiscussion, type DiffRefs } from './inline.js';
+import { withHeader } from './noteHeader.js';
 
 export const STANDARDS_HEADING = '## 🤖 Codex · стандарты';
 
@@ -96,9 +97,10 @@ export async function postStandards(
   review: StandardsReview,
   log: Logger,
   coverage?: DiffCoverage,
+  header: readonly string[] = [],
 ): Promise<void> {
   const unplaced = await placeViolationsInline(api, projectId, mrIid, refs, review, log);
-  await api.MergeRequestNotes.create(projectId, mrIid, buildStandardsNote(review, unplaced, coverage));
+  await api.MergeRequestNotes.create(projectId, mrIid, withHeader(buildStandardsNote(review, unplaced, coverage), header));
 }
 
 /** Создаёт inline-треды нарушений; возвращает те, чью позицию GitLab не принял. */

@@ -149,6 +149,7 @@ export const prepareReview: KindHandler = async (ctx) => {
           linkify(consolidation?.summary ?? ''),
           { bugs: bugsSection, standards: standardsSection, spec: specSection },
           consolidation !== null,
+          ctx.noteHeader(),
         ),
       );
     },

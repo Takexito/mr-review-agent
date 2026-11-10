@@ -6,6 +6,8 @@ import { resolveProfile, type AppConfig, type EngineName, type ProjectProfile } 
 import type { Logger } from '../logger.js';
 import type { GitlabClient } from '../gitlab/client.js';
 import type { Agent, RunOptions } from '../agent/types.js';
+import type { ToolCall } from '../agent/journal.js';
+import { noteHeader } from '../gitlab/noteHeader.js';
 import { NO_ACCESS, type AgentAccess } from '../connectors/engineConfig.js';
 import { openConnector, type OpenConnector } from '../connectors/mcpClient.js';
 import { AgentRateLimitError } from '../agent/types.js';
@@ -251,6 +253,8 @@ export function createProcessor(
 
       const access = agentAccess(config, profile);
       contextHints.push(...accessHints(access));
+      // Один на джобу: дочитывания идут с теми же `runOptions` и дописывают сюда же.
+      const journal: ToolCall[] = [];
 
       // Оркестратор держится на суб-агентах codex; у остальных движков общее ревью — это поиск багов.
       const kind = data.kind === 'REVIEW' && agent.name !== 'codex' ? 'BUGS' : data.kind;
@@ -280,6 +284,7 @@ export function createProcessor(
         existingThreads: mrFiles.excerpt,
         contextHints,
         degraded,
+        noteHeader: () => noteHeader({ calls: journal, related: related.repos }),
         linkify: makeBlobLinker(worktree, config.gitlabHost, data.projectPath, mr.headSha),
       });
 
@@ -296,6 +301,7 @@ export function createProcessor(
         readDirs,
         ...(prepared.needsWrite ? { needsWrite: true } : {}),
         access,
+        journal,
       };
 
       const runCtx = { api, projectId: data.projectId, mrIid: data.mrIid, jlog };
@@ -303,6 +309,7 @@ export function createProcessor(
       if (output === null) return; // rate-limit: уведомили, не ретраим
 
       await prepared.publish(output, (prompt) => rerunAgent(agent, prompt, runOptions, jlog));
+      jlog.info({ calls: journal.map((c) => `${c.server}.${c.tool}:${c.ok ? 'ok' : 'failed'}`) }, 'agent tool calls');
       await bestEffort(warnIfStale(api, data.projectId, data.mrIid, mr.headSha, jlog));
       jlog.info('job done');
     } finally {

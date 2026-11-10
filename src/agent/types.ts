@@ -1,5 +1,6 @@
 import type { EngineName } from '../config.js';
 import type { AgentAccess } from '../connectors/engineConfig.js';
+import type { ToolCall } from './journal.js';
 
 /**
  * Абстракция движка ревью. Инкапсулирует запуск CLI-агента под подпиской
@@ -26,6 +27,8 @@ export interface RunOptions {
   readonly needsWrite?: boolean;
   /** Коннекторы, сеть и CLI-инструменты профиля проекта. Пусто — только чтение worktree. */
   readonly access?: AgentAccess;
+  /** Сюда движок дописывает вызовы инструментов коннекторов, в том числе упавшего прогона. */
+  readonly journal?: ToolCall[];
 }
 
 /**

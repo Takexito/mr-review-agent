@@ -4,6 +4,7 @@ import type { AppConfig } from '../config.js';
 import { AgentAuthError, AgentRateLimitError, AgentRunError } from '../agent/types.js';
 import { codexMcpOverrides, type AgentAccess } from '../connectors/engineConfig.js';
 import { agentEnv } from '../agent/env.js';
+import { parseCodexEvents, type ToolCall } from '../agent/journal.js';
 
 /** Codex упёрся в лимит подписки — такие джобы НЕ ретраим. Наследник общего Agent*Error. */
 export class CodexRateLimitError extends AgentRateLimitError {
@@ -94,22 +95,24 @@ export interface RunCodexOptions {
   readonly access?: AgentAccess;
   /** Запись в каталог джобы (оркестратор). Сеть при этом не открывается. */
   readonly needsWrite?: boolean;
+  /** См. `RunOptions.journal`. */
+  readonly journal?: ToolCall[];
 }
 
 /**
- * Запускает `codex exec` под подпиской (CODEX_HOME → auth.json) и возвращает stdout.
+ * Запускает `codex exec --json` под подпиской (CODEX_HOME → auth.json) и возвращает последнее сообщение агента.
  * Коннекторы ходят в сеть из своих MCP-процессов, поэтому песочница остаётся `read-only`,
  * пока профиль не открыл сеть самому агенту. Токены ботов в окружение codex не попадают.
  */
 export async function runCodex(prompt: string, options: RunCodexOptions): Promise<string> {
-  const { cwd, config, access, needsWrite } = options;
+  const { cwd, config, access, needsWrite, journal } = options;
 
   // Сеть codex даёт только в workspace-write (в read-only DNS не резолвится — curl отдаёт exit 6).
   // Запись при этом открыта в worktree и весь TMPDIR: `git.cacheDir` вне TMPDIR, иначе агент
   // получит запись в общий кэш репозиториев всех проектов.
   const args = access?.agentNetwork
-    ? ['exec', '--sandbox', 'workspace-write', '-c', 'sandbox_workspace_write.network_access=true']
-    : ['exec', '--sandbox', needsWrite ? 'workspace-write' : 'read-only'];
+    ? ['exec', '--json', '--sandbox', 'workspace-write', '-c', 'sandbox_workspace_write.network_access=true']
+    : ['exec', '--json', '--sandbox', needsWrite ? 'workspace-write' : 'read-only'];
 
   if (config.codexModel) args.push('-m', config.codexModel);
   if (config.codexReasoning) args.push('-c', `model_reasoning_effort=${config.codexReasoning}`);
@@ -131,7 +134,9 @@ export async function runCodex(prompt: string, options: RunCodexOptions): Promis
       // execa не должен наследовать окружение поверх нашего allowlist.
       extendEnv: false,
     });
-    return result.stdout;
+    const events = parseCodexEvents(result.stdout);
+    journal?.push(...events.calls);
+    return events.text;
   } catch (error) {
     if (error instanceof ExecaError) {
       const stderr = String(error.stderr ?? '');
@@ -140,20 +145,25 @@ export async function runCodex(prompt: string, options: RunCodexOptions): Promis
       // коннекторов; текст ошибки уходит в лог и в заметку MR.
       const exitSummary = `codex завершился с кодом ${error.exitCode ?? '?'}`;
       const failLog = process.env['CODEX_FAIL_LOG'];
-      if (failLog) await writeFile(failLog, `${exitSummary}\n\n${stderr}`, 'utf8').catch(() => undefined);
-      const errors = codexErrorLines(stderr);
-      const haystack = errors;
+      // С `--json` codex сообщает о сбое событиями в stdout, а stderr оставляет пустым.
+      if (failLog) await writeFile(failLog, `${exitSummary}\n\n${stderr}\n\n${stdout}`, 'utf8').catch(() => undefined);
+      const events = parseCodexEvents(stdout);
+      journal?.push(...events.calls);
+      // Только последнее: событием `error` codex сообщает и о промежуточных сбоях, после которых
+      // переподключается, — ранний «429, retrying» сделал бы из любого сбоя лимит без ретрая.
+      const reason = events.errors.at(-1);
+      const errors = [codexErrorLines(stderr), reason ?? ''].filter((e) => e.length > 0).join('\n');
       // Порядок важен: auth (401) отличаем от rate-limit — у них разные инструкции.
-      if (looksAuthInvalid(haystack)) {
+      if (looksAuthInvalid(errors)) {
         throw new CodexAuthError('Codex subscription token invalidated (401)');
       }
-      if (looksRateLimited(haystack)) {
+      if (looksRateLimited(errors)) {
         throw new CodexRateLimitError('Codex rate/usage limit reached');
       }
       if (error.timedOut) {
         throw new CodexRunError('таймаут выполнения codex');
       }
-      throw new CodexRunError(conciseCodexError(errors, '', exitSummary));
+      throw new CodexRunError(reason ? conciseCodexError('', '', reason) : conciseCodexError(errors, '', exitSummary));
     }
     throw new CodexRunError(conciseCodexError('', '', String(error)));
   }

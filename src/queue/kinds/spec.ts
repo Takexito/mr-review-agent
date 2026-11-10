@@ -157,19 +157,15 @@ export const prepareSpec: KindHandler = async (ctx) => {
           SPEC_HEADING,
           linkify(parseAnswerOutput(output)),
           buildCoverage(diff, null),
+          ctx.noteHeader(),
         );
         return;
       }
       const spec = await axis.complete(parsed.spec, rerun);
       const coverage = buildCoverage(diff, spec);
       logCoverage(jlog, coverage);
-      await postSpecReview(api, data.projectId, data.mrIid, mr, spec, jlog, {
-        targets: axis.targets,
-        degraded,
-        worktree: ctx.worktree,
-        linkify,
-        coverage,
-      });
+      const options = { targets: axis.targets, degraded, worktree: ctx.worktree, linkify, coverage };
+      await postSpecReview(api, data.projectId, data.mrIid, mr, spec, jlog, options, ctx.noteHeader());
     },
   };
 };

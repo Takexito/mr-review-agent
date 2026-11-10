@@ -5,7 +5,10 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 vi.mock('execa', () => {
   class ExecaError extends Error {}
   return {
-    execa: vi.fn(async () => ({ stdout: 'codex-ok', stderr: '' })),
+    execa: vi.fn(async () => ({
+      stdout: JSON.stringify({ type: 'item.completed', item: { id: 'item_0', type: 'agent_message', text: 'codex-ok' } }),
+      stderr: '',
+    })),
     ExecaError,
   };
 });
@@ -14,6 +17,8 @@ import { execa } from 'execa';
 import { runCodex } from '../src/codex/run.js';
 import type { AgentAccess, NamedConnector } from '../src/connectors/engineConfig.js';
 import type { AppConfig } from '../src/config.js';
+import type { ToolCall } from '../src/agent/journal.js';
+import { AgentRateLimitError } from '../src/agent/types.js';
 
 const config = {
   codexBin: 'codex',
@@ -67,7 +72,7 @@ describe('runCodex: промпт через stdin, не через argv', () => 
       readonly string[],
       Record<string, unknown>,
     ];
-    expect(args).toEqual(['exec', '--sandbox', 'read-only', '-c', 'model_reasoning_effort=xhigh', '-']);
+    expect(args).toEqual(['exec', '--json', '--sandbox', 'read-only', '-c', 'model_reasoning_effort=xhigh', '-']);
   });
 });
 
@@ -192,5 +197,91 @@ describe('runCodex: сбой не раскрывает токены коннек
     );
     expect(String(error)).not.toContain('lin_secret');
     expect(String(error)).toContain('1');
+  });
+});
+
+/** Строки `codex exec --json` в том виде, в каком их отдаёт codex 0.165–0.166. */
+function events(...items: readonly object[]): string {
+  return items.map((e) => JSON.stringify(e)).join('\n');
+}
+const message = (text: string): object => ({ type: 'item.completed', item: { type: 'agent_message', text } });
+const mcpCall = (tool: string, args: object, status: string): object => ({
+  type: 'item.completed',
+  item: { type: 'mcp_tool_call', server: 'linear', tool, arguments: args, result: null, error: null, status },
+});
+
+describe('runCodex: поток событий --json', () => {
+  it('возвращает последнее сообщение агента, а не промежуточные', async () => {
+    mockedExeca.mockResolvedValueOnce({
+      stdout: events({ type: 'thread.started' }, message('Сейчас посмотрю.'), message('ИТОГ')),
+      stderr: '',
+    } as never);
+
+    expect(await runCodex('p', { cwd: '/tmp/wt', config })).toBe('ИТОГ');
+  });
+
+  it('записывает в журнал завершённые вызовы коннекторов с исходом', async () => {
+    mockedExeca.mockResolvedValueOnce({
+      stdout: events(
+        { type: 'item.started', item: { type: 'mcp_tool_call', server: 'linear', tool: 'get_issue', status: 'in_progress' } },
+        mcpCall('get_issue', { id: 'PRJ-7' }, 'completed'),
+        mcpCall('get_issue', { id: 'BAD-1' }, 'failed'),
+        { type: 'item.completed', item: { type: 'command_execution', command: 'ls', status: 'completed' } },
+        message('OK'),
+      ),
+      stderr: '',
+    } as never);
+
+    const journal: ToolCall[] = [];
+    await runCodex('p', { cwd: '/tmp/wt', config, journal });
+    expect(journal).toEqual([
+      { server: 'linear', tool: 'get_issue', arguments: { id: 'PRJ-7' }, ok: true },
+      { server: 'linear', tool: 'get_issue', arguments: { id: 'BAD-1' }, ok: false },
+    ]);
+  });
+
+  it('узнаёт лимит подписки по событию turn.failed: с --json codex пишет ошибки в stdout', async () => {
+    const { ExecaError } = await import('execa');
+    const failure = Object.assign(new (ExecaError as unknown as new (m: string) => Error)('failed'), {
+      shortMessage: 'Command failed with exit code 1',
+      stderr: '',
+      stdout: events(
+        // Предупреждения конфигурации приходят тем же типом `error`, но элементом, а не событием.
+        { type: 'item.completed', item: { type: 'error', message: 'quota of something is deprecated' } },
+        { type: 'turn.failed', error: { message: "You've hit your usage limit." } },
+      ),
+      exitCode: 1,
+      timedOut: false,
+    });
+    mockedExeca.mockRejectedValueOnce(failure);
+
+    await expect(runCodex('p', { cwd: '/tmp/wt', config })).rejects.toBeInstanceOf(AgentRateLimitError);
+  });
+
+  it('не принимает предупреждение-элемент и промежуточную ошибку переподключения за причину сбоя', async () => {
+    const { ExecaError } = await import('execa');
+    const failure = Object.assign(new (ExecaError as unknown as new (m: string) => Error)('failed'), {
+      shortMessage: 'Command failed with exit code 1',
+      stderr: '',
+      stdout: events(
+        { type: 'item.completed', item: { type: 'error', message: 'quota of something is deprecated' } },
+        { type: 'error', message: 'Reconnecting... 1/5 (429 Too Many Requests)' },
+        mcpCall('get_issue', { id: 'PRJ-7' }, 'completed'),
+        { type: 'error', message: 'stream disconnected before completion' },
+      ),
+      exitCode: 1,
+      timedOut: false,
+    });
+    mockedExeca.mockRejectedValueOnce(failure);
+
+    const journal: ToolCall[] = [];
+    const error = await runCodex('p', { cwd: '/tmp/wt', config, journal }).then(
+      () => null,
+      (e: unknown) => e as Error,
+    );
+    expect(error).not.toBeInstanceOf(AgentRateLimitError);
+    expect(error?.message).toContain('stream disconnected');
+    // Упавшее дочитывание тоже открывало источники.
+    expect(journal).toHaveLength(1);
   });
 });

@@ -73,6 +73,7 @@ export const prepareStandards: KindHandler = async (ctx) => {
           STANDARDS_HEADING,
           linkify(parseAnswerOutput(output)),
           buildCoverage(diff, null),
+          ctx.noteHeader(),
         );
         return;
       }
@@ -87,7 +88,7 @@ export const prepareStandards: KindHandler = async (ctx) => {
       const review = linkifyStandards(completed, linkify);
       const coverage = buildCoverage(diff, completed);
       logCoverage(jlog, coverage);
-      await postStandards(api, data.projectId, data.mrIid, mr, review, jlog, coverage);
+      await postStandards(api, data.projectId, data.mrIid, mr, review, jlog, coverage, ctx.noteHeader());
     },
   };
 };

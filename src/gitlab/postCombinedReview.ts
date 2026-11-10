@@ -46,8 +46,9 @@ export function buildCombinedNote(
   summary: string,
   sections: Readonly<Record<AxisName, AxisSection>>,
   consolidated: boolean,
+  header: readonly string[] = [],
 ): string {
-  const lines: string[] = [REVIEW_HEADING];
+  const lines: string[] = [REVIEW_HEADING, ...header];
   if (summary.trim().length > 0) lines.push('', summary.trim());
   if (!consolidated) {
     lines.push('', '> ⚠️ Сведение осей не получено: разделы ниже показаны как есть, возможны повторы между ними.');

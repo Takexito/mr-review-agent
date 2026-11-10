@@ -16,10 +16,14 @@ export const prepareAsk: KindHandler = async (ctx) => {
   return {
     prompt,
     publish: async (output) => {
-      await postAnswer(api, data.projectId, data.mrIid, linkify(parseAnswerOutput(output)), {
-        discussionId: data.discussionId,
-        noteId: data.noteId,
-      });
+      await postAnswer(
+        api,
+        data.projectId,
+        data.mrIid,
+        linkify(parseAnswerOutput(output)),
+        { discussionId: data.discussionId, noteId: data.noteId },
+        ctx.noteHeader(),
+      );
     },
   };
 };

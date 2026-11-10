@@ -10,8 +10,9 @@ export async function postAnswer(
   mrIid: number,
   answer: string,
   thread: { readonly discussionId?: string; readonly noteId: number },
+  header: readonly string[] = [],
 ): Promise<void> {
-  const body = ['## 🤖 Codex', '', answer.trim()].join('\n');
+  const body = ['## 🤖 Codex', ...header, '', answer.trim()].join('\n');
 
   if (thread.discussionId) {
     try {

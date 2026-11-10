@@ -1,5 +1,6 @@
 import type { GitlabClient } from './client.js';
 import type { Review, ReviewComment } from '../codex/parseReview.js';
+import { withHeader } from './noteHeader.js';
 import type { Logger } from '../logger.js';
 import { coverageWarning, hasGaps, type DiffCoverage } from './coverage.js';
 import { createInlineDiscussion, type DiffRefs } from './inline.js';
@@ -52,13 +53,14 @@ export async function postReview(
   review: Review,
   log: Logger,
   coverage?: DiffCoverage,
+  header: readonly string[] = [],
 ): Promise<void> {
   const ranked = rankBugs(review);
   const unplaced = await placeBugsInline(api, projectId, mrIid, refs, ranked.review, log);
   await api.MergeRequestNotes.create(
     projectId,
     mrIid,
-    buildSummary(ranked.review, unplaced, coverage, ranked.hiddenInfo),
+    withHeader(buildSummary(ranked.review, unplaced, coverage, ranked.hiddenInfo), header),
   );
 }
 
@@ -164,7 +166,8 @@ export async function postRawReview(
   heading: string,
   rawText: string,
   coverage?: DiffCoverage,
+  header: readonly string[] = [],
 ): Promise<void> {
-  const body = [heading, ...coverageWarning(coverage), '', rawText.trim()].join('\n');
+  const body = [heading, ...header, ...coverageWarning(coverage), '', rawText.trim()].join('\n');
   await api.MergeRequestNotes.create(projectId, mrIid, body);
 }

@@ -4,7 +4,8 @@ export const ENGINE_NAMES = ['codex', 'claude'] as const;
 
 const SECRET_PREFIX = 'secret:';
 
-const CONNECTOR_NAME = /^[A-Za-z0-9-]+$/;
+export const CONNECTOR_NAME_PATTERN = '[A-Za-z0-9-]+';
+const CONNECTOR_NAME = new RegExp(`^${CONNECTOR_NAME_PATTERN}$`);
 // Значение уходит в `Bash(<tool> *)` у claude: `*` или пробел открыли бы любую команду.
 const CLI_TOOL_NAME = /^[A-Za-z0-9._-]+$/;
 // Префикс ключа задачи (`PRJ` в `PRJ-137`) или `#` — задачи GitLab, см. `findDirectTargets`.
