@@ -166,7 +166,7 @@ GitLab (webhook: Note events) ──▶ POST /webhook (X-Gitlab-Token)
 ```bash
 docker exec mr-review-agent node dist/cli/dryRun.js \
   --project acme/android-app --mr 163 --kind SPEC --out /tmp/dry-run/spec.md
-docker cp mr-review-agent:/tmp/dry-run/spec.md .
+mkdir -p dry-run && docker cp mr-review-agent:/tmp/dry-run/spec.md dry-run/
 ```
 
 `--kind`: `REVIEW` | `BUGS` | `STANDARDS` | `SPEC` | `ASK`; `--arg` — источники для `SPEC` или вопрос для `ASK`.
@@ -226,7 +226,7 @@ curl -s localhost:8080/healthz | jq   # ждём {"status":"ok",...}
 Порт слушается на `127.0.0.1:8080`. Наружу — на выбор:
 
 ```bash
-# dev: туннель
+# dev: временный адрес trycloudflare — в текущем деплое постоянный review-bot.example.com (DEPLOY.md)
 cloudflared tunnel --url http://localhost:8080
 # или: ngrok http 8080
 ```
@@ -236,11 +236,11 @@ cloudflared tunnel --url http://localhost:8080
 
 ### Настройка GitLab-вебхука
 
-Group `acme` (или конкретный проект) → **Settings → Webhooks**:
+Каждый проект → **Settings → Webhooks** (вебхуки группы — только в GitLab Premium; у `acme` Free):
 
 - URL: `https://<публичный-url>/webhook`
 - Secret token: значение `WEBHOOK_SECRET`
-- Триггеры: **Comments** (Note events)
+- Триггеры: только **Comments** (Note events); **Push events** GitLab включает по умолчанию — снять
 
 ## Локальная разработка
 
@@ -273,7 +273,7 @@ curl -X POST localhost:8080/webhook \
 В `.env` — только секреты.
 Отладочная `CODEX_FAIL_LOG` (путь к файлу) в `.env` не нужна — её задают на один запуск.
 
-После правки `service.yaml` или `.env` контейнер нужно пересоздать: `docker compose up -d codex-bot`.
+После правки `service.yaml` или `.env` контейнер нужно пересоздать: `docker compose up -d --force-recreate codex-bot`.
 `docker compose restart` переменные не перечитывает.
 
 ### `.review.yml` в репозитории
