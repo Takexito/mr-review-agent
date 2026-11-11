@@ -69,6 +69,18 @@ describe('runCodex: промпт через stdin, не через argv', () => 
     expect(opts.stdin).not.toBe('ignore');
   });
 
+  it('берёт модель и усилие профиля поверх настроек движка', async () => {
+    await runCodex('p', { cwd: '/tmp/wt', config: { ...config, codexModel: 'gpt-5' } as AppConfig, model: { model: 'gpt-6.1-sol', reasoning: 'low' } });
+    const [, args] = mockedExeca.mock.calls[0] as unknown as [string, readonly string[]];
+    expect(args).toEqual(['exec', '--json', '--sandbox', 'read-only', '-c', 'features.apps=false', '-m', 'gpt-6.1-sol', '-c', 'model_reasoning_effort=low', '-']);
+  });
+
+  it('оставляет настройку движка для того, что профиль не переопределил', async () => {
+    await runCodex('p', { cwd: '/tmp/wt', config: { ...config, codexModel: 'gpt-5' } as AppConfig, model: { model: 'gpt-6.1-sol' } });
+    const [, args] = mockedExeca.mock.calls[0] as unknown as [string, readonly string[]];
+    expect(args).toEqual(['exec', '--json', '--sandbox', 'read-only', '-c', 'features.apps=false', '-m', 'gpt-6.1-sol', '-c', 'model_reasoning_effort=xhigh', '-']);
+  });
+
   it('прокидывает reasoning-effort и не кладёт промпт в argv', async () => {
     await runCodex('короткий промпт', { cwd: '/tmp/wt', config });
     const [, args] = mockedExeca.mock.calls[0] as unknown as [

@@ -101,7 +101,7 @@ async function writeMcpConfig(jobDir: string, connectors: readonly NamedConnecto
 export function createClaudeAgent(config: AppConfig): Agent {
   return {
     name: 'claude',
-    run: async (prompt, { cwd, jobDir, readDirs, access, journal }) => {
+    run: async (prompt, { cwd, jobDir, readDirs, access, journal, model }) => {
       const args = [
         '--print',
         '--output-format',
@@ -113,7 +113,8 @@ export function createClaudeAgent(config: AppConfig): Agent {
         '--allowedTools',
         claudeAllowedTools(config.claudeAllowedTools, access ?? NO_ACCESS).join(','),
       ];
-      if (config.claudeModel) args.push('--model', config.claudeModel);
+      const claudeModel = model?.model ?? config.claudeModel;
+      if (claudeModel) args.push('--model', claudeModel);
       for (const dir of readDirs ?? []) args.push('--add-dir', dir);
       if (access && access.connectors.length > 0) {
         args.push('--mcp-config', await writeMcpConfig(jobDir, access.connectors), '--strict-mcp-config');

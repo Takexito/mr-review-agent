@@ -82,6 +82,9 @@ profiles:
     projects: [acme/android-app]
     # Какие боты отвечают в проекте. Пусто = все настроенные движки.
     # engines: [codex]
+    # Модель и усилие для проектов профиля — поверх engines.<движок>.model/reasoning; у claude только model.
+    # Значения не проверяются при запуске: опечатка проявится падением прогона.
+    # models: { codex: { model: gpt-6.1-sol, reasoning: xhigh }, claude: { model: opus } }
     # connectors: [linear, gitlab]
     # Прямые цели MR: префикс ключа → коннектор с prefetch; "#" — задачи GitLab (#34, ветка 34-…).
     # Ищутся в заголовке MR, имени ветки, строках Closes/Fixes/Resolves/Refs и аргументе `spec`.

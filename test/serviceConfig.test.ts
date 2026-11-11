@@ -60,6 +60,23 @@ function errorOf(fn: () => unknown): string {
 }
 
 describe('parseServiceConfig', () => {
+  it('should take model and reasoning overrides of a profile per engine', () => {
+    const yaml = FULL.replace(
+      '    connectors: [linear]\n',
+      '    connectors: [linear]\n    models: { codex: { model: gpt-6.1-sol, reasoning: xhigh }, claude: { model: opus } }\n',
+    );
+    const [android, acme] = parseServiceConfig(yaml, ENV).profiles;
+    expect(android!.models).toEqual({ codex: { model: 'gpt-6.1-sol', reasoning: 'xhigh' }, claude: { model: 'opus' } });
+    expect(acme!.models).toEqual({});
+  });
+
+  it('should reject a model override for an engine that is not configured, and reasoning for claude', () => {
+    const yaml = MINIMAL + '    models: { claude: { model: opus } }\n';
+    expect(errorOf(() => parseServiceConfig(yaml, ENV))).toContain('profiles.0.models.claude: движок claude не настроен');
+    const reasoning = FULL.replace('    connectors: [linear]\n', '    connectors: [linear]\n    models: { claude: { reasoning: high } }\n');
+    expect(errorOf(() => parseServiceConfig(reasoning, ENV))).toContain('reasoning');
+  });
+
   it('should apply defaults when only required fields are set', () => {
     const config = parseServiceConfig(MINIMAL, ENV);
     expect(config.port).toBe(8080);

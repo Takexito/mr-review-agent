@@ -12,6 +12,7 @@ const profile: ProjectProfile = {
   related: [{ project: 'acme/docs' }],
   relatedAllowlist: ['acme/**'],
   issueKeys: { PRJ: 'linear', '#': 'gitlab' },
+  models: {},
 };
 
 describe('applyRepoConfig', () => {

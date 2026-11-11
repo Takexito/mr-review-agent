@@ -1,4 +1,4 @@
-import type { EngineName } from '../config.js';
+import type { EngineName, ModelChoice } from '../config.js';
 import type { AgentAccess } from '../connectors/engineConfig.js';
 import type { ToolCall } from './journal.js';
 
@@ -29,6 +29,8 @@ export interface RunOptions {
   readonly access?: AgentAccess;
   /** Сюда движок дописывает вызовы инструментов коннекторов, в том числе упавшего прогона. */
   readonly journal?: ToolCall[];
+  /** Модель и усилие профиля; незаданное берётся из настроек движка. */
+  readonly model?: ModelChoice | undefined;
 }
 
 /**

@@ -79,6 +79,13 @@ describe('createClaudeAgent.run: read-only, промпт через stdin', () =
     expect(env.ANTHROPIC_API_KEY).toBeUndefined();
   });
 
+  it('берёт модель профиля поверх модели движка', async () => {
+    await createClaudeAgent(config).run('p', { cwd: '/tmp/wt', jobDir: '/tmp/job', model: { model: 'opus' } });
+    const [, args] = mockedExeca.mock.calls[0] as unknown as [string, readonly string[]];
+    expect(args[args.indexOf('--model') + 1]).toBe('opus');
+    expect(args).not.toContain('sonnet');
+  });
+
   it('не пропускает секреты бота в окружение claude', async () => {
     vi.stubEnv('GITLAB_TOKEN', 'glpat-secret');
     vi.stubEnv('WEBHOOK_SECRET', 'hook-secret');

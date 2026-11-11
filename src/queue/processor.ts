@@ -309,6 +309,7 @@ export function createProcessor(
         ...(prepared.needsWrite ? { needsWrite: true } : {}),
         access,
         journal,
+        model: profile?.models[agent.name],
       };
 
       const runCtx = { api, projectId: data.projectId, mrIid: data.mrIid, jlog };

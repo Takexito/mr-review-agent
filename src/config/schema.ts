@@ -134,6 +134,13 @@ export function buildServiceSchema(env: Env) {
       related: z.array(RELATED_REPO).default([]),
       relatedAllowlist: z.array(z.string().min(1)).default([]),
       issueKeys: z.record(z.string()).default({}),
+      models: z
+        .object({
+          codex: z.object({ model: z.string().min(1).optional(), reasoning: z.string().min(1).optional() }).strict().optional(),
+          claude: z.object({ model: z.string().min(1).optional() }).strict().optional(),
+        })
+        .strict()
+        .default({}),
     })
     .strict();
 
@@ -232,6 +239,11 @@ export function buildServiceSchema(env: Env) {
         for (const e of p.engines ?? []) {
           if (!config.engines[e]) {
             ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['profiles', i, 'engines'], message: `движок ${e} не настроен` });
+          }
+        }
+        for (const e of ENGINE_NAMES) {
+          if (p.models[e] && !config.engines[e]) {
+            ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['profiles', i, 'models', e], message: `движок ${e} не настроен` });
           }
         }
         const seen = new Set<string>();

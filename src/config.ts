@@ -40,6 +40,13 @@ export interface ProjectProfile {
   readonly relatedAllowlist: readonly string[];
   /** Префикс ключа задачи → коннектор, скачивающий её как прямую цель. */
   readonly issueKeys: Readonly<Record<string, string>>;
+  /** Поверх `model`/`reasoning` движка, см. `RunOptions.model`. */
+  readonly models: Readonly<Partial<Record<EngineName, ModelChoice>>>;
+}
+
+export interface ModelChoice {
+  readonly model?: string | undefined;
+  readonly reasoning?: string | undefined;
 }
 
 export interface CliTool {

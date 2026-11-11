@@ -1,6 +1,6 @@
 import { writeFile } from 'node:fs/promises';
 import { execa, ExecaError } from 'execa';
-import type { AppConfig } from '../config.js';
+import type { AppConfig, ModelChoice } from '../config.js';
 import { AgentAuthError, AgentRateLimitError, AgentRunError } from '../agent/types.js';
 import { cliToolsEnv, codexMcpOverrides, type AgentAccess } from '../connectors/engineConfig.js';
 import { agentEnv } from '../agent/env.js';
@@ -98,6 +98,8 @@ export interface RunCodexOptions {
   readonly needsWrite?: boolean;
   /** См. `RunOptions.journal`. */
   readonly journal?: ToolCall[];
+  /** См. `RunOptions.model`. */
+  readonly model?: ModelChoice | undefined;
 }
 
 /**
@@ -107,6 +109,8 @@ export interface RunCodexOptions {
  */
 export async function runCodex(prompt: string, options: RunCodexOptions): Promise<string> {
   const { cwd, config, access, needsWrite, journal } = options;
+  const model = options.model?.model ?? config.codexModel;
+  const reasoning = options.model?.reasoning ?? config.codexReasoning;
 
   // Сеть codex даёт только в workspace-write (в read-only DNS не резолвится — curl отдаёт exit 6).
   // Запись при этом открыта в worktree и весь TMPDIR: `git.cacheDir` вне TMPDIR, иначе агент
@@ -118,8 +122,8 @@ export async function runCodex(prompt: string, options: RunCodexOptions): Promis
   // Приложения ChatGPT-аккаунта подписки (`codex_apps`) — MCP вне `service.yaml`, с пишущими
   // инструментами и чужими токенами: агенту открыты только коннекторы профиля.
   args.push('-c', 'features.apps=false');
-  if (config.codexModel) args.push('-m', config.codexModel);
-  if (config.codexReasoning) args.push('-c', `model_reasoning_effort=${config.codexReasoning}`);
+  if (model) args.push('-m', model);
+  if (reasoning) args.push('-c', `model_reasoning_effort=${reasoning}`);
   for (const override of codexMcpOverrides(access?.connectors ?? [])) args.push('-c', override);
   // Промпт передаём через stdin (`-`), а не позиционным argv: большие SPEC/REVIEW-промпты
   // (дифф + требования + треды) превышают MAX_ARG_STRLEN (128 КБ) и падают с E2BIG на execve.
