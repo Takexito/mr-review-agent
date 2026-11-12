@@ -11,3 +11,5 @@ data/
 dry-run/
 # настройки конкретного деплоя; шаблон — service.example.yaml
 service.yaml
+# локальные настройки агентов
+.claude/settings.local.json
