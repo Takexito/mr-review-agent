@@ -3,8 +3,8 @@
 Бот уже развёрнут (README → «Быстрый старт», DEPLOY.md), нужно научить его работать ещё в одном
 проекте GitLab. Справочник по каждому полю — комментарии в [`service.example.yaml`](../service.example.yaml).
 
-В примерах — значения текущего деплоя: бот-аккаунт `codex_bot` (тегать `@codex_bot`; имя задаёт
-`engines.codex.bot.username`), публичный адрес `https://review-bot.example.com` (постоянный
+В примерах бот-аккаунт — `codex_bot` (тегать `@codex_bot`; имя задаёт
+`engines.codex.bot.username`), публичный адрес бота — `https://review-bot.example.com` (постоянный
 туннель из DEPLOY.md). Проект — `my-group/my-app`, смежный репозиторий — `my-group/my-docs`.
 
 Команды ниже — из корня репозитория бота, `glab` залогинен под пользователем с правом Maintainer
@@ -35,7 +35,7 @@ glab api "projects/my-group%2Fmy-docs/members/all/$BOT_ID" | jq .access_level   
 
 ## 2. Вебхук — в каждом проекте
 
-Вебхуки группы есть только в GitLab Premium; на Free (как у `acme`) вебхук заводится в каждом
+Вебхуки группы есть только в GitLab Premium; на Free вебхук заводится в каждом
 проекте отдельно. Нужны только **Comments** (Note events): GitLab по умолчанию включает ещё
 **Push events** — их надо снять, иначе каждый пуш будет уходить боту впустую.
 

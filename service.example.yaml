@@ -8,7 +8,7 @@ server:
   # Секрет, который GitLab шлёт в X-Gitlab-Token. Сгенерируй: openssl rand -hex 32
   webhookSecret: secret:WEBHOOK_SECRET
   redisUrl: redis://redis:6379
-  # Сиат подписки общий с живым разработчиком — при учащении rate-limit откатывай в 1.
+  # Если сиат подписки общий с разработчиком и rate-limit учащается — снижай до 1.
   queueConcurrency: 2
 
 gitlab:
