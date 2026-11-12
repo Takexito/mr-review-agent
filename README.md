@@ -211,7 +211,7 @@ permitted`) и `git push` (плюс remote прописан без токена)
 
 ## Требования
 
-- Docker + docker compose.
+- Docker + docker compose. Для локальной разработки без Docker — Node 24+.
 - **GitLab бот-юзер** с PAT (scope `api`) — от него постятся комменты. Его username = то, что тегают (`@codex`).
   Клонирует репозитории сам бот (не агент, песочница на это не влияет), и для клона хватает
   read-only доступа: роль Reporter + scope `read_repository`. Если хочется урезать права на
