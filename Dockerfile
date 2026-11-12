@@ -1,8 +1,8 @@
 # --- build ---
 FROM node:20-bookworm-slim AS build
 WORKDIR /app
-COPY package.json ./
-RUN npm install
+COPY package.json package-lock.json ./
+RUN npm ci
 COPY tsconfig.json tsconfig.build.json ./
 COPY src ./src
 RUN npm run build
@@ -20,9 +20,9 @@ ENV NODE_ENV=production \
 RUN apt-get update \
     && apt-get install -y --no-install-recommends git ca-certificates bubblewrap curl \
     && rm -rf /var/lib/apt/lists/*
-COPY package.json ./
-RUN npm install --omit=dev \
-    && npm install -g @openai/codex@0.166.0 @anthropic-ai/claude-code \
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev \
+    && npm install -g @openai/codex@0.166.0 @anthropic-ai/claude-code@2.1.322 \
     && npm cache clean --force
 COPY --from=build /app/dist ./dist
 RUN mkdir -p /data/codex /data/repos
