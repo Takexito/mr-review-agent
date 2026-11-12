@@ -9,6 +9,7 @@ const NoteHookSchema = z
     object_kind: z.literal('note'),
     user: z
       .object({
+        id: z.number(),
         username: z.string(),
       })
       .passthrough(),
@@ -25,6 +26,9 @@ const NoteHookSchema = z
         noteable_type: z.string(),
         discussion_id: z.string().optional(),
         url: z.string().optional(),
+        // Старые версии GitLab называют флаг `confidential`, новые — `internal`.
+        internal: z.boolean().optional(),
+        confidential: z.boolean().optional(),
       })
       .passthrough(),
     merge_request: z
@@ -45,6 +49,9 @@ export interface ParsedNoteEvent {
   readonly noteId: number;
   readonly noteBody: string;
   readonly authorUsername: string;
+  readonly authorId: number;
+  /** Внутренняя заметка: видна только участникам проекта с ролью Reporter и выше. */
+  readonly internal: boolean;
   readonly discussionId?: string;
   readonly noteUrl?: string;
 }
@@ -80,6 +87,8 @@ export function parseNoteHook(body: unknown): ParseResult {
       noteId: data.object_attributes.id,
       noteBody: data.object_attributes.note,
       authorUsername: data.user.username,
+      authorId: data.user.id,
+      internal: data.object_attributes.internal === true || data.object_attributes.confidential === true,
       discussionId: data.object_attributes.discussion_id,
       noteUrl: data.object_attributes.url,
     },

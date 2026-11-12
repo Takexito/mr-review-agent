@@ -7,6 +7,7 @@ import {
   DEFAULT_TIMEOUT_MS,
   ENGINE_NAMES,
   type ConnectorConfig,
+  type TriggerRole,
 } from './config/schema.js';
 
 /** Какой CLI-движок исполняет ревью. */
@@ -33,6 +34,10 @@ export interface ProjectProfile {
   readonly projects: readonly string[];
   readonly engines: readonly EngineName[];
   readonly connectors: readonly string[];
+  /** Минимальная роль автора заметки, при которой бот берёт её в работу. */
+  readonly triggerRole: TriggerRole;
+  /** `ignore` — internal-заметки не запускают бота и не попадают в промпт. */
+  readonly internalNotes: 'ignore' | 'include';
   readonly agentNetwork: boolean;
   readonly cliTools: readonly CliTool[];
   readonly related: readonly RelatedRepo[];
@@ -99,6 +104,8 @@ export interface AppConfig {
   readonly connectors: Readonly<Record<string, ConnectorConfig>>;
   /** Порядок важен: побеждает первый совпавший, см. `resolveProfile`. */
   readonly profiles: readonly ProjectProfile[];
+  /** Значения всех `secret:NAME` из `service.yaml` — их вычищают из исходящих заметок. */
+  readonly secretValues: readonly string[];
 }
 
 export class ConfigError extends Error {
@@ -116,13 +123,15 @@ export function parseServiceConfig(yamlText: string, env: NodeJS.ProcessEnv): Ap
     const at = linePos?.[0] ? ` (строка ${linePos[0].line}, столбец ${linePos[0].col})` : '';
     throw new ConfigError(`service.yaml: невалидный YAML: ${code ?? 'parse error'}${at}`);
   }
-  const result = buildServiceSchema(env).safeParse(raw ?? {});
+  const resolved: string[] = [];
+  const result = buildServiceSchema(env, resolved).safeParse(raw ?? {});
   if (!result.success) {
     const lines = result.error.issues.map((i) => `  ${i.path.join('.') || '(корень)'}: ${i.message}`);
     throw new ConfigError(`service.yaml:\n${lines.join('\n')}`);
   }
   const file = result.data;
   const { codex, claude } = file.engines;
+  const secretValues = [...new Set(resolved)];
 
   const bindings: EngineBinding[] = [{ engine: 'codex', handle: codex.bot.username, gitlabToken: codex.bot.token }];
   if (claude) bindings.push({ engine: 'claude', handle: claude.bot.username, gitlabToken: claude.bot.token });
@@ -158,6 +167,7 @@ export function parseServiceConfig(yamlText: string, env: NodeJS.ProcessEnv): Ap
     coverageFollowup: file.review.coverageFollowup,
     connectors: file.connectors,
     profiles: file.profiles.map((p) => ({ ...p, engines: p.engines ?? configured })),
+    secretValues,
   };
 }
 

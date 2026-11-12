@@ -49,11 +49,24 @@ function escapeRegExp(value: string): string {
  * null — если упоминания нет.
  */
 export function extractAfterMention(body: string, botUsername: string): string | null {
-  const mention = new RegExp(`@${escapeRegExp(botUsername)}\\b`, 'i');
-  const match = mention.exec(body);
+  // `\b` здесь не годится: он пропускает `@codex-team`, `@codex.io` и `user@codex.io`.
+  const mention = new RegExp(`(?<![\\w.@])@${escapeRegExp(botUsername)}(?![\\w-]|\\.\\w)`, 'i');
+  const match = mention.exec(maskQuotedText(body));
   if (!match) return null;
-  const matched = match[0] ?? '';
-  return body.slice(match.index + matched.length).trim();
+  return body.slice(match.index + match[0].length).trim();
+}
+
+/**
+ * Заменяет пробелами блоки кода, инлайн-код и строки цитат: упоминание бота в них — пример или
+ * пересказ, а не вызов. Длина текста сохраняется, чтобы индекс совпадения подходил к исходному тексту.
+ */
+function maskQuotedText(body: string): string {
+  const blank = (s: string): string => s.replace(/[^\n]/g, ' ');
+  return body
+    .replace(/^(```|~~~)[\s\S]*?(?:^\1|(?![\s\S]))/gm, blank)
+    .replace(/^>>>[\s\S]*?(?:^>>>|(?![\s\S]))/gm, blank)
+    .replace(/`[^`\n]*`/g, blank)
+    .replace(/^[ \t]*>.*$/gm, blank);
 }
 
 /**

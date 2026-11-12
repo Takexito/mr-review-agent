@@ -7,6 +7,8 @@ const profile: ProjectProfile = {
   projects: ['acme/android-app'],
   engines: ['codex'],
   connectors: ['linear', 'gitlab'],
+  triggerRole: 'developer',
+  internalNotes: 'ignore',
   agentNetwork: false,
   cliTools: [],
   related: [{ project: 'acme/docs' }],

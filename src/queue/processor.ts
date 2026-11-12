@@ -96,6 +96,7 @@ async function writeMrFiles(
   data: JobData,
   mr: { title: string; description: string },
   jobDir: string,
+  includeInternal: boolean,
   jlog: Logger,
 ): Promise<{ dir: string; excerpt: string }> {
   const dir = join(jobDir, 'mr');
@@ -106,7 +107,7 @@ async function writeMrFiles(
   let threads = '';
   let threadsFile = '(обсуждений нет)\n';
   try {
-    threads = await fetchThreads(api, data.projectId, data.mrIid, current);
+    threads = await fetchThreads(api, data.projectId, data.mrIid, { currentDiscussionId: current, includeInternal });
     if (threads) threadsFile = threads;
   } catch (error) {
     jlog.warn({ err: String(error) }, 'fetch discussions failed, continue without prior context');
@@ -228,7 +229,7 @@ export function createProcessor(
     try {
       // Треды нужны всем режимам: осям ревью — для дедупа уже поднятого, ASK — чтобы
       // видеть тред, в который отвечает (реплай на собственное замечание бота).
-      const mrFiles = await writeMrFiles(api, data, mr, jobDir, jlog);
+      const mrFiles = await writeMrFiles(api, data, mr, jobDir, profile?.internalNotes === 'include', jlog);
 
       const related = await checkoutRelated(profile?.related ?? [], { jobDir, sourceBranch: mr.sourceBranch }, jlog, {
         ensureCache: (project) => ensureBareCache(config, project),

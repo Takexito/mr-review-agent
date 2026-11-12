@@ -15,6 +15,8 @@ function evt(overrides: Partial<ParsedNoteEvent>): ParsedNoteEvent {
     noteId: 1,
     noteBody: '',
     authorUsername: 'alice',
+    authorId: 42,
+    internal: false,
     discussionId: 'd1',
     ...overrides,
   };
@@ -31,6 +33,28 @@ describe('extractAfterMention', () => {
 
   it('should return null when there is no mention', () => {
     expect(extractAfterMention('just a normal comment', BOT)).toBeNull();
+  });
+
+  it('should not match a longer handle or an email with the bot name', () => {
+    expect(extractAfterMention('@codex-team глянь', BOT)).toBeNull();
+    expect(extractAfterMention('@codex_bot глянь', BOT)).toBeNull();
+    expect(extractAfterMention('пиши на user@codex.io', BOT)).toBeNull();
+  });
+
+  it('should accept punctuation right after the handle', () => {
+    expect(extractAfterMention('@codex, ревью', BOT)).toBe(', ревью');
+  });
+
+  it('should ignore a mention inside a code block, inline code or a quote', () => {
+    expect(extractAfterMention('```\n@codex review\n```', BOT)).toBeNull();
+    expect(extractAfterMention('тегай `@codex review`', BOT)).toBeNull();
+    expect(extractAfterMention('> @codex review\n\nсогласен', BOT)).toBeNull();
+    expect(extractAfterMention('>>>\n@codex review\n>>>\nок', BOT)).toBeNull();
+    expect(extractAfterMention('~~~\n@codex review\n~~~', BOT)).toBeNull();
+  });
+
+  it('should find a real mention after a quoted one', () => {
+    expect(extractAfterMention('> @codex review\n\n@codex bugs', BOT)).toBe('bugs');
   });
 });
 
@@ -120,7 +144,18 @@ describe('parseNoteHook + resolveIntent (fixture)', () => {
     if (!parsed.ok) return;
     expect(parsed.event.mrIid).toBe(7);
     expect(parsed.event.projectPath).toBe('acme/android-app');
+    expect(parsed.event.authorId).toBe(42);
+    expect(parsed.event.internal).toBe(false);
     expect(resolveIntent(parsed.event, BOT).kind).toBe('REVIEW');
+  });
+
+  it('should flag an internal note whichever field the GitLab version sends', () => {
+    const path = fileURLToPath(new URL('./fixtures/note.json', import.meta.url));
+    const body = JSON.parse(readFileSync(path, 'utf8')) as { object_attributes: Record<string, unknown> };
+    for (const field of ['internal', 'confidential']) {
+      const parsed = parseNoteHook({ ...body, object_attributes: { ...body.object_attributes, [field]: true } });
+      expect(parsed.ok && parsed.event.internal).toBe(true);
+    }
   });
 
   it('should ignore a non-MergeRequest note', () => {

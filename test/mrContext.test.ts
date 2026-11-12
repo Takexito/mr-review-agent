@@ -78,6 +78,27 @@ describe('formatDiscussions', () => {
     expect(text).not.toContain('ВОПРОС ЗАДАН');
   });
 
+  it('should drop internal notes unless they are explicitly included', () => {
+    const discussions = [
+      {
+        id: 'd',
+        notes: [
+          { body: 'публичная реплика', author: { username: 'a' } },
+          { body: 'скрытая цена контракта', internal: true, author: { username: 'b' } },
+          { body: 'скрытая на старом GitLab', confidential: true, author: { username: 'c' } },
+        ],
+      },
+    ];
+
+    const hidden = formatDiscussions(discussions);
+    expect(hidden).toContain('публичная реплика');
+    expect(hidden).not.toContain('скрытая');
+
+    const shown = formatDiscussions(discussions, { includeInternal: true });
+    expect(shown).toContain('скрытая цена контракта');
+    expect(shown).toContain('скрытая на старом GitLab');
+  });
+
   it('should tolerate malformed payloads', () => {
     expect(formatDiscussions([null, undefined, {}, { notes: 'nonsense' }])).toBe('');
   });

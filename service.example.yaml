@@ -5,7 +5,7 @@
 server:
   port: 8080
   logLevel: info
-  # Секрет, который GitLab шлёт в X-Gitlab-Token. Сгенерируй: openssl rand -hex 32
+  # Секрет, который GitLab шлёт в X-Gitlab-Token, не короче 32 символов. Сгенерируй: openssl rand -hex 32
   webhookSecret: secret:WEBHOOK_SECRET
   redisUrl: redis://redis:6379
   # Если сиат подписки общий с разработчиком и rate-limit учащается — снижай до 1.
@@ -82,6 +82,12 @@ profiles:
     projects: [acme/android-app]
     # Какие боты отвечают в проекте. Пусто = все настроенные движки.
     # engines: [codex]
+    # Минимальная роль автора заметки, чтобы запустить бота: reporter | developer | maintainer | owner.
+    # Ниже — бот молча игнорирует заметку. Роль проверяется API участников проекта с учётом группы.
+    # triggerRole: developer
+    # Internal-заметки: ignore — не запускают бота и не попадают в промпт; include — как обычные.
+    # При include ответ бота всё равно публичный и может пересказать скрытое.
+    # internalNotes: ignore
     # Модель и усилие для проектов профиля — поверх engines.<движок>.model/reasoning; у claude только model.
     # Значения не проверяются при запуске: опечатка проявится падением прогона.
     # models: { codex: { model: gpt-6.1-sol, reasoning: xhigh }, claude: { model: opus } }

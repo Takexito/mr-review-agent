@@ -16,6 +16,8 @@ function evt(overrides: Partial<ParsedNoteEvent>): ParsedNoteEvent {
     noteId: 1,
     noteBody: '',
     authorUsername: 'alice',
+    authorId: 42,
+    internal: false,
     discussionId: 'd1',
     ...overrides,
   };

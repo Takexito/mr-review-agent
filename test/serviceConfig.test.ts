@@ -3,7 +3,7 @@ import { parseServiceConfig, resolveProfile } from '../src/config.js';
 import { matchesProjectGlob } from '../src/config/glob.js';
 
 const ENV = {
-  WEBHOOK_SECRET: 'whsec',
+  WEBHOOK_SECRET: 'test-webhook-secret-placeholder-000',
   CODEX_BOT_TOKEN: 'glpat-codex',
   CLAUDE_BOT_TOKEN: 'glpat-claude',
   CLAUDE_OAUTH: 'oauth',
@@ -81,10 +81,42 @@ describe('parseServiceConfig', () => {
     const config = parseServiceConfig(MINIMAL, ENV);
     expect(config.port).toBe(8080);
     expect(config.gitlabHost).toBe('https://gitlab.com');
-    expect(config.webhookSecret).toBe('whsec');
+    expect(config.webhookSecret).toBe(ENV.WEBHOOK_SECRET);
+    expect(config.profiles[0]).toMatchObject({ triggerRole: 'developer', internalNotes: 'ignore' });
     expect(config.gitlabCloneToken).toBe('glpat-codex');
     expect(config.bindings).toEqual([{ engine: 'codex', handle: 'codex', gitlabToken: 'glpat-codex' }]);
     expect(config.claudeEnabled).toBe(false);
+  });
+
+  it('should reject a short or placeholder webhook secret', () => {
+    for (const weak of ['change-me', 'short-secret']) {
+      expect(errorOf(() => parseServiceConfig(MINIMAL, { ...ENV, WEBHOOK_SECRET: weak }))).toContain('server.webhookSecret');
+    }
+  });
+
+  it('should take trigger role and internal notes policy of a profile', () => {
+    const yaml = `${MINIMAL}    triggerRole: maintainer\n    internalNotes: include\n`;
+    expect(parseServiceConfig(yaml, ENV).profiles[0]).toMatchObject({ triggerRole: 'maintainer', internalNotes: 'include' });
+    expect(errorOf(() => parseServiceConfig(`${MINIMAL}    triggerRole: guest\n`, ENV))).toContain('triggerRole');
+  });
+
+  it('should list the value of every resolved secret reference', () => {
+    const config = parseServiceConfig(FULL, ENV);
+    expect([...config.secretValues].sort()).toEqual(
+      [ENV.WEBHOOK_SECRET, 'glpat-codex', 'glpat-claude', 'oauth', 'lin_api_x'].sort(),
+    );
+  });
+
+  it('should not take a hint that merely starts with secret: for a secret reference', () => {
+    const yaml = `${MINIMAL}    related:\n      - { project: g/docs, hint: "secret:PATH" }\n`;
+    expect(parseServiceConfig(yaml, { ...ENV, PATH: '/usr/local/bin' }).secretValues).not.toContain('/usr/local/bin');
+  });
+
+  it('should report a missing webhook secret once, without a misleading length error', () => {
+    const { WEBHOOK_SECRET: _, ...rest } = ENV;
+    const error = errorOf(() => parseServiceConfig(MINIMAL, rest));
+    expect(error).toContain('WEBHOOK_SECRET');
+    expect(error).not.toContain('короче');
   });
 
   it('should enable claude when its section is present', () => {

@@ -17,6 +17,12 @@ const ISSUE_KEY_PREFIX = /^(#|[A-Z][A-Z0-9]{0,9})$/;
 // Путь уходит в URL клона и в имя каталога рядом с worktree: `..` вывел бы его за каталог джобы.
 const PROJECT_PATH = /^[A-Za-z0-9_][\w.-]*(\/[A-Za-z0-9_][\w.-]*)+$/;
 
+/** Роли GitLab по возрастанию прав; значение — `access_level` API участников проекта. */
+export const TRIGGER_ROLES = { reporter: 20, developer: 30, maintainer: 40, owner: 50 } as const;
+export type TriggerRole = keyof typeof TRIGGER_ROLES;
+
+const MIN_WEBHOOK_SECRET_LENGTH = 32;
+
 /** `ref` смежного репозитория: ветка с тем же именем, что у MR, если она есть. */
 export const SAME_BRANCH = 'same-branch';
 
@@ -53,31 +59,33 @@ export const CLAUDE_DEFAULTS = {
 
 type Env = Readonly<Record<string, string | undefined>>;
 
-function resolveSecret(raw: string, env: Env, ctx: z.RefinementCtx): string {
+function resolveSecret(raw: string, env: Env, ctx: z.RefinementCtx, resolved: string[]): string {
   const name = raw.slice(SECRET_PREFIX.length);
   const value = env[name];
   if (!value) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, message: `переменная окружения ${name} не задана или пуста` });
     return z.NEVER;
   }
+  resolved.push(value);
   return value;
 }
 
 /**
  * Схема `service.yaml`. Строится от env, потому что ссылки `secret:NAME` разрешаются при разборе.
  * Сообщения об ошибках не должны содержать значение поля: в поле-секрет по ошибке могли вписать сам токен.
+ * В `resolved` складываются значения всех разрешённых ссылок `secret:NAME`.
  */
-export function buildServiceSchema(env: Env) {
+export function buildServiceSchema(env: Env, resolved: string[] = []) {
   const secret = z.string().transform((raw, ctx) => {
     if (!raw.startsWith(SECRET_PREFIX)) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'ожидается ссылка secret:NAME, значение в файле не допускается' });
       return z.NEVER;
     }
-    return resolveSecret(raw, env, ctx);
+    return resolveSecret(raw, env, ctx, resolved);
   });
   const maybeSecret = z
     .string()
-    .transform((raw, ctx) => (raw.startsWith(SECRET_PREFIX) ? resolveSecret(raw, env, ctx) : raw));
+    .transform((raw, ctx) => (raw.startsWith(SECRET_PREFIX) ? resolveSecret(raw, env, ctx, resolved) : raw));
 
   const bot = z.object({ username: z.string().min(1), token: secret }).strict();
 
@@ -129,6 +137,8 @@ export function buildServiceSchema(env: Env) {
       projects: z.array(z.string().min(1)).min(1),
       engines: z.array(z.enum(ENGINE_NAMES)).min(1).optional(),
       connectors: z.array(z.string()).default([]),
+      triggerRole: z.enum(Object.keys(TRIGGER_ROLES) as [TriggerRole, ...TriggerRole[]]).default('developer'),
+      internalNotes: z.enum(['ignore', 'include']).default('ignore'),
       agentNetwork: z.boolean().default(false),
       cliTools: z.array(cliTool).default([]),
       related: z.array(RELATED_REPO).default([]),
@@ -150,7 +160,10 @@ export function buildServiceSchema(env: Env) {
         .object({
           port: z.number().int().positive().default(8080),
           logLevel: z.string().default('info'),
-          webhookSecret: secret,
+          // Неразрешённая ссылка уже дала свою ошибку; длина z.NEVER — ложная вторая.
+          webhookSecret: secret.refine((value) => typeof value !== 'string' || value.length >= MIN_WEBHOOK_SECRET_LENGTH, {
+            message: `секрет короче ${MIN_WEBHOOK_SECRET_LENGTH} символов; сгенерируй: openssl rand -hex 32`,
+          }),
           redisUrl: z.string().default('redis://redis:6379'),
           queueConcurrency: z.number().int().positive().default(2),
         })

@@ -14,8 +14,26 @@ describe('redactSecrets', () => {
     expect(redactSecrets('token glpat-SeCrEt_1 and lin_api_SeCrEt2')).toBe('token glpat-*** and lin_api_***');
   });
 
+  it('should strip every GitLab token type, Anthropic and OpenAI keys, JWTs and bearer headers', () => {
+    const jwt = 'eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiIxIn0.c2lnbmF0dXJl';
+    const text = [
+      'glptt-abc123 gldt-abc123 glrt-abc123 glsoat-abc123 glcbt-abc123',
+      'sk-ant-oat01-AbC_d-123 sk-proj-AbCdEfGhIjKlMnOpQrSt',
+      `id_token ${jwt}`,
+      'Authorization: Bearer abc.DEF-123_xyz7890',
+    ].join('\n');
+    expect(redactSecrets(text)).toBe(
+      [
+        'glptt-*** gldt-*** glrt-*** glsoat-*** glcbt-***',
+        'sk-ant-*** sk-***',
+        'id_token ***',
+        'Authorization: Bearer ***',
+      ].join('\n'),
+    );
+  });
+
   it('should leave ordinary urls and text alone', () => {
-    const text = 'see https://gitlab.com/g/p/-/issues/1 and user@example.com';
+    const text = 'see https://gitlab.com/g/p/-/issues/1 and user@example.com, task-runner and sk-1.\nuse the Bearer token scheme; Bearer\nheader';
     expect(redactSecrets(text)).toBe(text);
   });
 });

@@ -30,6 +30,8 @@ export interface FormatOptions {
    * как вопрос из ниоткуда.
    */
   readonly currentDiscussionId?: string;
+  /** Без флага internal-заметки отбрасываются: ответ бота публичный и пересказал бы их всем. */
+  readonly includeInternal?: boolean;
 }
 
 /**
@@ -53,6 +55,7 @@ export function formatDiscussions(
     for (const rn of notes) {
       const n = rec(rn);
       if (n['system'] === true) continue;
+      if (!options.includeInternal && (n['internal'] === true || n['confidential'] === true)) continue;
       const body = str(n['body']).trim();
       if (body.length === 0 || isServiceNote(body)) continue;
 
@@ -113,10 +116,10 @@ export async function fetchThreads(
   api: GitlabClient,
   projectId: number,
   mrIid: number,
-  currentDiscussionId?: string,
+  options: FormatOptions = {},
 ): Promise<string> {
   const discussions = (await api.MergeRequestDiscussions.all(projectId, mrIid, {
     perPage: 100,
   })) as unknown[];
-  return formatDiscussions(discussions, { currentDiscussionId });
+  return formatDiscussions(discussions, options);
 }

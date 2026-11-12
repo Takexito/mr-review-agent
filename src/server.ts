@@ -12,6 +12,8 @@ import { createClaudeAgent } from './agent/claude.js';
 import type { Agent } from './agent/types.js';
 import { cached, checkCodexAuth, checkClaudeAuth, checkGitlabToken, probeCodexSession, type AuthHealth } from './health.js';
 import { createGitlabWithToken, type GitlabClient } from './gitlab/client.js';
+import { checkTriggerRole } from './gitlab/access.js';
+import { knownSecrets } from './util/knownSecrets.js';
 import { redactSecrets } from './util/redact.js';
 import type { JobData } from './queue/job.js';
 
@@ -48,7 +50,7 @@ async function main(): Promise<void> {
   };
   const clients: Partial<Record<EngineName, GitlabClient>> = {};
   for (const b of config.bindings) {
-    clients[b.engine] = createGitlabWithToken(config.gitlabHost, b.gitlabToken);
+    clients[b.engine] = createGitlabWithToken(config.gitlabHost, b.gitlabToken, () => knownSecrets(config));
   }
 
   const worker = createWorker(
@@ -141,10 +143,23 @@ async function main(): Promise<void> {
       return reply.code(200).send({ ignored: true, reason: `project ${event.projectPath} matches no profile` });
     }
 
+    if (event.internal && profile.internalNotes === 'ignore') {
+      log.info({ mr: event.mrIid }, 'webhook: ignored (internal note)');
+      return reply.code(200).send({ ignored: true, reason: 'internal note' });
+    }
+
     const routed = route(event, config.bindings, profile.engines);
     if (!routed) {
       log.info({ mr: event.mrIid }, 'webhook: ignored (no bot mention / own note)');
       return reply.code(200).send({ ignored: true, reason: 'no bot mention or own note' });
+    }
+
+    // Отказ без ответа в MR: заметка бота по запросу постороннего — уже канал спама.
+    const access = await checkTriggerRole(clients[routed.engine]!, event.projectId, event.authorId, profile.triggerRole);
+    if (!access.ok) {
+      const level = access.reason.startsWith('members API failed') ? 'warn' : 'info';
+      log[level]({ mr: event.mrIid, author: event.authorUsername, reason: access.reason }, 'webhook: ignored (author role too low)');
+      return reply.code(200).send({ ignored: true, reason: 'author role too low' });
     }
     const intent = routed.intent;
 

@@ -13,6 +13,8 @@ const profile = {
   projects: ['g/*'],
   engines: ['codex'],
   connectors: ['linear'],
+  triggerRole: 'developer',
+  internalNotes: 'ignore',
   agentNetwork: false,
   cliTools: [],
   related: [],
