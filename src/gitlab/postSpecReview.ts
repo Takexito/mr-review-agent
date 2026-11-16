@@ -12,7 +12,7 @@ const STATUS_EMOJI: Record<SpecStatus, string> = {
   na: '➖',
 };
 
-export const SPEC_HEADING = '## 🤖 Codex · соответствие требованиям';
+export const SPEC_HEADING = '## 🤖 Соответствие требованиям';
 export const SPEC_NOT_RUN = 'Сверка с постановкой не запускалась.';
 
 export function degradedLines(degraded: readonly string[] | undefined): string[] {

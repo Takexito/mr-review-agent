@@ -1,5 +1,5 @@
 import { execa, ExecaError } from 'execa';
-import { writeFile } from 'node:fs/promises';
+import { appendFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { AppConfig } from '../config.js';
 import type { Agent } from './types.js';
@@ -36,6 +36,15 @@ const RATE_LIMIT_MARKERS = [
   'overloaded',
   '529',
 ];
+
+/**
+ * Отладка сухого прогона: `CLAUDE_STREAM_LOG=<файл>` дописывает туда сырой поток событий каждого
+ * запуска. В потоке — код проекта и текст задач, файл не должен уходить из каталога dry-run.
+ */
+async function appendStreamLog(stdout: string): Promise<void> {
+  const path = process.env['CLAUDE_STREAM_LOG'];
+  if (path) await appendFile(path, `${stdout}\n`, 'utf8').catch(() => undefined);
+}
 
 function looks(text: string, markers: readonly string[]): boolean {
   const lower = text.toLowerCase();
@@ -132,12 +141,14 @@ export function createClaudeAgent(config: AppConfig): Agent {
           env: agentEnv(process.env, { ...cliToolsEnv(access), CLAUDE_CODE_OAUTH_TOKEN: config.claudeOauthToken }),
           extendEnv: false,
         });
+        await appendStreamLog(result.stdout);
         return extractClaudeResult(result.stdout, journal);
       } catch (error) {
         // is_error из события result уже AgentRunError — не заворачиваем повторно.
         if (error instanceof AgentRunError) throw error;
         if (error instanceof ExecaError) {
           const stderr = String(error.stderr ?? '');
+          await appendStreamLog(String(error.stdout ?? ''));
           // В stdout весь поток событий, включая прочитанные агентом файлы и задачи — там «429» и
           // «401» встречаются в коде; о сбое говорит только событие result.
           const stream = parseClaudeStream(String(error.stdout ?? ''));

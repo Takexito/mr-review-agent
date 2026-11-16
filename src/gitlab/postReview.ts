@@ -7,7 +7,7 @@ import { createInlineDiscussion, type DiffRefs } from './inline.js';
 
 export type { DiffRefs } from './inline.js';
 
-export const BUGS_HEADING = '## 🤖 Codex · поиск багов';
+export const BUGS_HEADING = '## 🤖 Поиск багов';
 
 /** Больше мелких замечаний тредами не публикуем: они тонут сами и топят важное. */
 export const MAX_INFO_COMMENTS = 5;

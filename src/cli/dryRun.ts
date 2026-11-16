@@ -11,7 +11,7 @@ import { knownSecrets } from '../util/knownSecrets.js';
 import { createProcessor } from '../queue/processor.js';
 import type { JobData, JobKind } from '../queue/job.js';
 import { ENGINE_NAMES } from '../config/schema.js';
-import { redactSecrets } from '../util/redact.js';
+import { describeError } from '../util/describeError.js';
 
 /**
  * Сухой прогон оси на реальном MR: весь путь джобы, но вместо публикации в GitLab —
@@ -114,6 +114,6 @@ async function main(): Promise<number> {
 main()
   .then((code) => process.exit(code))
   .catch((error) => {
-    process.stderr.write(`Сухой прогон упал: ${redactSecrets(String(error))}\n`);
+    process.stderr.write(`Сухой прогон упал: ${describeError(error)}\n`);
     process.exit(1);
   });

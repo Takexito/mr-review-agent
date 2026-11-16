@@ -32,7 +32,7 @@ GitLab (webhook: Note events) ──▶ POST /webhook (X-Gitlab-Token)
 ```
 
 - `@codex review` / `ревью` / пустое упоминание → **общее ревью**: три оси ниже одним прогоном и одна
-  заметка «Codex review» с разделами «Баги», «Стандарты», «Постановка» (см. «Общее ревью»).
+  заметка «Ревью» с разделами «Баги», «Стандарты», «Постановка» (см. «Общее ревью»).
 - `@codex bugs` / `баги` → поиск багов, внесённых диффом: summary-заметка + inline-дискуссии по строкам.
   Замечания идут по важности (blocker → warn → info); тредами публикуется не больше пяти info,
   остальные — счётчиком в сводке.
@@ -195,6 +195,13 @@ mkdir -p dry-run && docker cp mr-review-agent:/tmp/dry-run/spec.md dry-run/
 docker exec -e CODEX_FAIL_LOG=/tmp/dry-run/fail.log mr-review-agent node dist/cli/dryRun.js …
 ```
 
+Что делал claude — какие файлы открывал, сколько ходов сделал, что ответил, — видно в сыром потоке
+событий: `CLAUDE_STREAM_LOG` дописывает в файл поток каждого запуска claude, в том числе успешного.
+
+```bash
+docker exec -e CLAUDE_STREAM_LOG=/tmp/dry-run/claude.jsonl mr-review-agent node dist/cli/dryRun.js … --engine claude
+```
+
 ### Что агенту доступно в git
 
 Репозиторий выкачан в bare-кэш со всеми ветками (`+refs/heads/*` + merge-ref MR), а worktree
@@ -290,7 +297,7 @@ curl -X POST localhost:8080/webhook \
 Подключить ещё один проект по шагам — [docs/new-project.md](docs/new-project.md).
 
 В `.env` — только секреты.
-Отладочная `CODEX_FAIL_LOG` (путь к файлу) в `.env` не нужна — её задают на один запуск.
+Отладочные `CODEX_FAIL_LOG` и `CLAUDE_STREAM_LOG` (путь к файлу) в `.env` не нужны — её задают на один запуск.
 
 После правки `service.yaml` или `.env` контейнер нужно пересоздать: `docker compose up -d --force-recreate codex-bot`.
 `docker compose restart` переменные не перечитывает.

@@ -1,6 +1,6 @@
 import { AXIS_LABEL, type AxisName } from '../codex/orchestratorPrompt.js';
 
-export const REVIEW_HEADING = '## 🤖 Codex review';
+export const REVIEW_HEADING = '## 🤖 Ревью';
 
 /** Что получилось у оси: готовые секции её заметки либо причина, по которой их нет. */
 export type AxisSection =

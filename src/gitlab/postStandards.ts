@@ -5,7 +5,7 @@ import { coverageWarning, hasGaps, type DiffCoverage } from './coverage.js';
 import { createInlineDiscussion, type DiffRefs } from './inline.js';
 import { withHeader } from './noteHeader.js';
 
-export const STANDARDS_HEADING = '## 🤖 Codex · стандарты';
+export const STANDARDS_HEADING = '## 🤖 Стандарты';
 
 function violationBody(v: Violation): string {
   return [
