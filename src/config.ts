@@ -4,6 +4,7 @@ import { matchesProjectGlob } from './config/glob.js';
 import {
   buildServiceSchema,
   CLAUDE_DEFAULTS,
+  CODEX_DEFAULTS,
   DEFAULT_TIMEOUT_MS,
   ENGINE_NAMES,
   type ConnectorConfig,
@@ -71,10 +72,11 @@ export interface AppConfig {
   readonly logLevel: string;
   readonly webhookSecret: string;
   readonly gitlabHost: string;
-  /** Токен бота codex: им ходит общий GitLab-клиент (dry-run, картинки из описания MR и целей). */
+  /** Токен бота codex, без codex — claude: им ходит общий GitLab-клиент (картинки из описания MR и целей). */
   readonly gitlabToken: string;
   /** Токен для clone/fetch (может быть урезан до `read_repository`). */
   readonly gitlabCloneToken: string;
+  readonly codexEnabled: boolean;
   readonly codexHome: string;
   readonly codexBin: string;
   readonly codexModel?: string;
@@ -88,7 +90,7 @@ export interface AppConfig {
   readonly claudePermissionMode: string;
   readonly claudeAllowedTools: readonly string[];
   readonly claudeTimeoutMs: number;
-  /** Бот-аккаунты настроенных движков, в порядке `engines` файла. */
+  /** Бот-аккаунты настроенных движков: codex, затем claude — независимо от порядка в файле. */
   readonly bindings: readonly EngineBinding[];
   readonly reposCacheDir: string;
   /** Порог переключения inline → agentic по байтам тела диффа. */
@@ -133,9 +135,11 @@ export function parseServiceConfig(yamlText: string, env: NodeJS.ProcessEnv): Ap
   const { codex, claude } = file.engines;
   const secretValues = [...new Set(resolved)];
 
-  const bindings: EngineBinding[] = [{ engine: 'codex', handle: codex.bot.username, gitlabToken: codex.bot.token }];
+  const bindings: EngineBinding[] = [];
+  if (codex) bindings.push({ engine: 'codex', handle: codex.bot.username, gitlabToken: codex.bot.token });
   if (claude) bindings.push({ engine: 'claude', handle: claude.bot.username, gitlabToken: claude.bot.token });
   const configured = bindings.map((b) => b.engine);
+  const gitlabToken = bindings[0]!.gitlabToken;
 
   return {
     port: file.server.port,
@@ -144,13 +148,14 @@ export function parseServiceConfig(yamlText: string, env: NodeJS.ProcessEnv): Ap
     redisUrl: file.server.redisUrl,
     queueConcurrency: file.server.queueConcurrency,
     gitlabHost: file.gitlab.host,
-    gitlabToken: codex.bot.token,
-    gitlabCloneToken: file.gitlab.cloneToken ?? codex.bot.token,
-    codexHome: codex.home,
-    codexBin: codex.bin,
-    codexModel: codex.model,
-    codexReasoning: codex.reasoning,
-    codexTimeoutMs: codex.timeoutMs,
+    gitlabToken,
+    gitlabCloneToken: file.gitlab.cloneToken ?? gitlabToken,
+    codexEnabled: !!codex,
+    codexHome: codex?.home ?? CODEX_DEFAULTS.home,
+    codexBin: codex?.bin ?? CODEX_DEFAULTS.bin,
+    codexModel: codex?.model,
+    codexReasoning: codex?.reasoning,
+    codexTimeoutMs: codex?.timeoutMs ?? DEFAULT_TIMEOUT_MS,
     claudeEnabled: !!claude,
     claudeOauthToken: claude?.oauthToken,
     claudeBin: claude?.bin ?? CLAUDE_DEFAULTS.bin,

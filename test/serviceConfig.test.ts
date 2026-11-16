@@ -127,6 +127,24 @@ describe('parseServiceConfig', () => {
     expect(config.codexModel).toBe('gpt-5');
   });
 
+  it('should run on claude alone, with its bot token for GitLab and cloning', () => {
+    const yaml = MINIMAL.replace(
+      '  codex:\n    bot: { username: codex, token: secret:CODEX_BOT_TOKEN }\n',
+      '  claude:\n    bot: { username: claude_bot, token: secret:CLAUDE_BOT_TOKEN }\n    oauthToken: secret:CLAUDE_OAUTH\n',
+    );
+    const config = parseServiceConfig(yaml, ENV);
+    expect(config.codexEnabled).toBe(false);
+    expect(config.bindings).toEqual([{ engine: 'claude', handle: 'claude_bot', gitlabToken: 'glpat-claude' }]);
+    expect(config.gitlabToken).toBe('glpat-claude');
+    expect(config.gitlabCloneToken).toBe('glpat-claude');
+    expect(config.profiles[0]!.engines).toEqual(['claude']);
+  });
+
+  it('should reject a config without any engine', () => {
+    const yaml = MINIMAL.replace('  codex:\n    bot: { username: codex, token: secret:CODEX_BOT_TOKEN }\n', '  {}\n');
+    expect(errorOf(() => parseServiceConfig(yaml, ENV))).toContain('engines: не настроен ни один движок');
+  });
+
   it('should resolve secret references inside connector env and keep plain values', () => {
     const config = parseServiceConfig(FULL, ENV);
     expect(config.connectors['linear']).toMatchObject({

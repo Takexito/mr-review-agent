@@ -19,5 +19,5 @@ export function codexAuthSecrets(codexHome: string): string[] {
  * codex ротирует токены сессии, и прочитанные при старте значения устаревают.
  */
 export function knownSecrets(config: AppConfig): readonly string[] {
-  return [...config.secretValues, ...codexAuthSecrets(config.codexHome)];
+  return config.codexEnabled ? [...config.secretValues, ...codexAuthSecrets(config.codexHome)] : config.secretValues;
 }

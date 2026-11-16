@@ -13,7 +13,7 @@ server:
 
 gitlab:
   host: https://gitlab.com
-  # Необязательно: токен только для clone/fetch (read_repository). Пусто = токен бота codex.
+  # Необязательно: токен только для clone/fetch (read_repository). Пусто = токен бота codex, без codex — claude.
   # cloneToken: secret:GITLAB_CLONE_TOKEN
 
 git:
@@ -31,6 +31,7 @@ review:
   # Дочитывание пропущенных агентом файлов: прогонов на ось (0 — выкл.) и файлов в прогоне.
   coverageFollowup: { runs: 5, batch: 40 }
 
+# Секция есть — движок включён. Нужен хотя бы один; удали секцию codex, чтобы работать только на claude.
 engines:
   codex:
     # Бот-аккаунт: username — то, что тегают (@codex); token — PAT со scope api.
@@ -38,7 +39,6 @@ engines:
     home: /data/codex
     # model: gpt-5
     # reasoning: high
-  # Секция есть — движок включён.
   # claude:
   #   bot: { username: claude_bot, token: secret:CLAUDE_GITLAB_TOKEN }
   #   # Годовой OAuth-токен подписки: `claude setup-token`.

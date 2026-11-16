@@ -40,6 +40,8 @@ export const RELATED_REPO = z
 
 export const DEFAULT_TIMEOUT_MS = 1_800_000;
 
+export const CODEX_DEFAULTS = { bin: 'codex', home: '/data/codex' } as const;
+
 export const CLAUDE_DEFAULTS = {
   bin: 'claude',
   model: 'sonnet',
@@ -198,13 +200,14 @@ export function buildServiceSchema(env: Env, resolved: string[] = []) {
           codex: z
             .object({
               bot,
-              bin: z.string().default('codex'),
-              home: z.string().default('/data/codex'),
+              bin: z.string().default(CODEX_DEFAULTS.bin),
+              home: z.string().default(CODEX_DEFAULTS.home),
               model: z.string().optional(),
               reasoning: z.string().optional(),
               timeoutMs,
             })
-            .strict(),
+            .strict()
+            .optional(),
           claude: z
             .object({
               bot,
@@ -238,6 +241,9 @@ export function buildServiceSchema(env: Env, resolved: string[] = []) {
     })
     .strict()
     .superRefine((config, ctx) => {
+      if (!ENGINE_NAMES.some((e) => config.engines[e])) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['engines'], message: 'не настроен ни один движок' });
+      }
       const names = new Set<string>();
       config.profiles.forEach((p, i) => {
         if (names.has(p.name)) {

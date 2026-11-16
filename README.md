@@ -179,11 +179,12 @@ GitLab (webhook: Note events) ──▶ POST /webhook (X-Gitlab-Token)
 
 ```bash
 docker exec mr-review-agent node dist/cli/dryRun.js \
-  --project acme/android-app --mr 163 --kind SPEC --out /tmp/dry-run/spec.md
+  --project acme/android-app --mr 163 --kind SPEC --engine claude --out /tmp/dry-run/spec.md
 mkdir -p dry-run && docker cp mr-review-agent:/tmp/dry-run/spec.md dry-run/
 ```
 
-`--kind`: `REVIEW` | `BUGS` | `STANDARDS` | `SPEC` | `ASK`; `--arg` — источники для `SPEC` или вопрос для `ASK`.
+`--kind`: `REVIEW` | `BUGS` | `STANDARDS` | `SPEC` | `ASK`; `--arg` — источники для `SPEC` или вопрос для `ASK`;
+`--engine`: `codex` | `claude`, по умолчанию codex, а без него — claude. GitLab читается токеном бота этого движка.
 Чтения идут в GitLab по-настоящему, все записи (заметки, треды, реакции) складываются в файл.
 Квота подписки при этом тратится как в боевом прогоне. Результаты содержат текст задач и код
 проверяемого проекта — каталог `dry-run/` в `.gitignore`.
@@ -216,7 +217,11 @@ permitted`) и `git push` (плюс remote прописан без токена)
   Клонирует репозитории сам бот (не агент, песочница на это не влияет), и для клона хватает
   read-only доступа: роль Reporter + scope `read_repository`. Если хочется урезать права на
   клон — задай отдельный `gitlab.cloneToken` в `service.yaml`.
-- **ChatGPT-подписка**: `auth.json` уже залогиненного Codex-аккаунта (`~/.codex/auth.json`).
+- **Подписка хотя бы одного движка** — у каждого движка свой бот-юзер:
+  - codex — ChatGPT-подписка: `auth.json` уже залогиненного Codex-аккаунта (`~/.codex/auth.json`);
+  - claude — Claude Pro/Max: годовой OAuth-токен `claude setup-token` в `CLAUDE_CODE_OAUTH_TOKEN`.
+  Движок без секции в `engines` выключен. Без codex шаг с `auth.json` в «Быстром старте» не нужен, а
+  `/healthz` codex не проверяет.
 
 ## Быстрый старт
 

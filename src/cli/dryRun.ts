@@ -6,17 +6,21 @@ import { loadConfig } from '../config.js';
 import { createLogger } from '../logger.js';
 import { createCodexAgent } from '../agent/codex.js';
 import { createClaudeAgent } from '../agent/claude.js';
-import { createGitlab, type GitlabClient } from '../gitlab/client.js';
+import { createGitlabWithToken, type GitlabClient } from '../gitlab/client.js';
+import { knownSecrets } from '../util/knownSecrets.js';
 import { createProcessor } from '../queue/processor.js';
 import type { JobData, JobKind } from '../queue/job.js';
+import { ENGINE_NAMES } from '../config/schema.js';
 import { redactSecrets } from '../util/redact.js';
 
 /**
  * Сухой прогон оси на реальном MR: весь путь джобы, но вместо публикации в GitLab —
- * markdown-файл. Запускать там же, где живёт бот (нужны codex и его песочница):
+ * markdown-файл. Запускать там же, где живёт бот (нужны движок и его песочница):
  *
  *   node dist/cli/dryRun.js --project acme/android-app --mr 163 --kind SPEC \
- *        [--arg '#34 PRJ-137' | --arg 'вопрос'] [--out /tmp/dry/spec.md]
+ *        [--engine claude] [--arg '#34 PRJ-137' | --arg 'вопрос'] [--out /tmp/dry/spec.md]
+ *
+ * Без `--engine` — codex, а без него — claude.
  */
 
 const KINDS: readonly JobKind[] = ['REVIEW', 'BUGS', 'STANDARDS', 'SPEC', 'ASK'];
@@ -60,20 +64,30 @@ async function main(): Promise<number> {
   const kind = (option('kind') ?? '').toUpperCase() as JobKind;
   const arg = option('arg') ?? '';
   const out = option('out') ?? `/tmp/dry-run/${kind.toLowerCase()}.md`;
+  const engineOption = option('engine')?.toLowerCase();
   if (!projectPath || !Number.isInteger(mrIid) || !KINDS.includes(kind)) {
-    process.stderr.write(`Нужны --project <path> --mr <iid> --kind <${KINDS.join('|')}> [--arg …] [--out файл]\n`);
+    process.stderr.write(
+      `Нужны --project <path> --mr <iid> --kind <${KINDS.join('|')}> [--engine <${ENGINE_NAMES.join('|')}>] [--arg …] [--out файл]\n`,
+    );
     return 1;
   }
 
   const config = loadConfig();
+  const binding = engineOption ? config.bindings.find((b) => b.engine === engineOption) : config.bindings[0];
+  if (!binding) {
+    process.stderr.write(`Движок ${engineOption} не настроен в service.yaml\n`);
+    return 1;
+  }
+  const { engine } = binding;
   const log = createLogger(config.logLevel);
-  const real = createGitlab(config);
+  // Боевая джоба ходит в GitLab токеном бота своего движка: с чужим токеном прогон увидит другие права.
+  const real = createGitlabWithToken(config.gitlabHost, binding.gitlabToken, () => knownSecrets(config));
   const project = (await real.Projects.show(projectPath)) as { id: number };
 
   const writes: string[] = [];
   const data: JobData = {
     kind,
-    engine: 'codex',
+    engine,
     projectId: project.id,
     projectPath,
     mrIid,
@@ -85,7 +99,7 @@ async function main(): Promise<number> {
 
   const processor = createProcessor(config, log, {
     engines: { codex: createCodexAgent(config), claude: createClaudeAgent(config) },
-    clients: { codex: recordingClient(real, writes) },
+    clients: { [engine]: recordingClient(real, writes) },
   });
   const started = Date.now();
   await processor({ id: `dry-run-${started}`, data } as Job<JobData>);

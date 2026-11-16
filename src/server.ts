@@ -82,6 +82,11 @@ async function main(): Promise<void> {
   const app = Fastify({ logger: false, bodyLimit: 5 * 1024 * 1024 });
 
   const probeCodex = cached(CODEX_PROBE_TTL_MS, () => probeCodexSession(config.codexBin, config.codexHome));
+  const codexHealth = async (): Promise<AuthHealth> => {
+    const file = await checkCodexAuth(config.codexHome);
+    // Без файла живая проверка бессмысленна, а её текст ошибки только затрёт причину.
+    return file.ok ? { ...(await probeCodex()), lastRefresh: file.lastRefresh } : file;
+  };
   const gitlabTokens = new Map<string, string>([
     ...config.bindings.map((b): [string, string] => [`${b.engine}Bot`, b.gitlabToken]),
     ['clone', config.gitlabCloneToken],
@@ -95,9 +100,7 @@ async function main(): Promise<void> {
   }
 
   app.get('/healthz', async (_req, reply) => {
-    const codexFile = await checkCodexAuth(config.codexHome);
-    // Без файла живая проверка бессмысленна, а её текст ошибки только затрёт причину.
-    const codex = codexFile.ok ? { ...(await probeCodex()), lastRefresh: codexFile.lastRefresh } : codexFile;
+    const codex = config.codexEnabled ? await codexHealth() : undefined;
     const claude = config.claudeEnabled ? checkClaudeAuth(config.claudeOauthToken) : undefined;
     const gitlab: Record<string, AuthHealth> = {};
     for (const [role, token] of gitlabTokens) {
@@ -112,10 +115,10 @@ async function main(): Promise<void> {
     }
     // Claude репортим информационно: его отсутствие/протухший токен не роняет сервис
     // (claude-джоба упадёт с remedy отдельно).
-    const ok = codex.ok && redisOk && Object.values(gitlab).every((g) => g.ok);
+    const ok = (codex?.ok ?? true) && redisOk && Object.values(gitlab).every((g) => g.ok);
     return reply.code(ok ? 200 : 503).send({
       status: ok ? 'ok' : 'degraded',
-      engines: { codex, ...(claude ? { claude } : {}) },
+      engines: { ...(codex ? { codex } : {}), ...(claude ? { claude } : {}) },
       gitlab,
       redis: redisOk ? 'ok' : 'down',
     });

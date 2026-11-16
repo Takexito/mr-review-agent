@@ -96,7 +96,8 @@ docker compose logs -f codex-bot             # ждём «mr-review-agent listen
 
 `status: degraded` вместо `ok` — смотри, какая проверка в ответе не прошла:
 
-- `engines.codex` — сиат: `auth.json` не доехал, лёг не туда или был инвалидирован;
+- `engines.codex` — сиат: `auth.json` не доехал, лёг не туда или был инвалидирован (только если codex включён;
+  у claude `/healthz` проверяет лишь наличие токена, протухший токен вскроется заметкой на первой джобе);
 - `gitlab.codexBot` / `clone` / `read` — истёк или неверен соответствующий токен в `.env`;
 - `redis` — не поднялся контейнер Redis.
 
