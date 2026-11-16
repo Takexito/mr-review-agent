@@ -19,7 +19,7 @@ import { execa } from 'execa';
 import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createClaudeAgent, extractClaudeResult } from '../src/agent/claude.js';
+import { claudeBashRules, createClaudeAgent, extractClaudeResult } from '../src/agent/claude.js';
 import { AgentRateLimitError, AgentRunError } from '../src/agent/types.js';
 import type { AppConfig } from '../src/config.js';
 import type { ToolCall } from '../src/agent/journal.js';
@@ -57,7 +57,8 @@ describe('createClaudeAgent.run: read-only, промпт через stdin', () =
     expect(agent.name).toBe('claude');
     // Промпт НЕ в argv, а в stdin.
     expect(args).not.toContain(prompt);
-    expect(opts.input).toBe(prompt);
+    expect(String(opts.input).startsWith(prompt)).toBe(true);
+    expect(String(opts.input)).toContain('ОГРАНИЧЕНИЯ BASH');
     // Read-only headless-набор флагов.
     expect(args).toContain('--print');
     expect(args).toContain('--output-format');
@@ -285,5 +286,18 @@ describe('createClaudeAgent.run: классификация сбоя по пот
   it('узнаёт лимит подписки по тексту события result', async () => {
     const error = await failWith(JSON.stringify({ type: 'result', is_error: true, result: 'Claude AI usage limit reached' }));
     expect(error).toBeInstanceOf(AgentRateLimitError);
+  });
+});
+
+describe('claudeBashRules', () => {
+  it('should list allowed Bash commands and forbid compound lines when Bash patterns are allowed', () => {
+    const rules = claudeBashRules(['Read', 'Bash(git diff *)', 'Bash(glab *)', 'mcp__linear']);
+
+    expect(rules).toContain('`git diff`, `glab`');
+    expect(rules).toContain('без `cd`');
+  });
+
+  it('should add nothing when no Bash command is allowed', () => {
+    expect(claudeBashRules(['Read', 'Grep'])).toBe('');
   });
 });

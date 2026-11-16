@@ -1,6 +1,6 @@
 import { execa, ExecaError } from 'execa';
-import { appendFile, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { appendFile, mkdir, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 import type { AppConfig } from '../config.js';
 import type { Agent } from './types.js';
 import { claudeAllowedTools, claudeMcpConfig, cliToolsEnv, NO_ACCESS, type NamedConnector } from '../connectors/engineConfig.js';
@@ -43,7 +43,12 @@ const RATE_LIMIT_MARKERS = [
  */
 async function appendStreamLog(stdout: string): Promise<void> {
   const path = process.env['CLAUDE_STREAM_LOG'];
-  if (path) await appendFile(path, `${stdout}\n`, 'utf8').catch(() => undefined);
+  if (!path) return;
+  // Каталог сухой прогон создаёт только в конце, под итоговый отчёт: без mkdir первый запуск в
+  // свежем контейнере молча теряет поток.
+  await mkdir(dirname(path), { recursive: true })
+    .then(() => appendFile(path, `${stdout}\n`, 'utf8'))
+    .catch((error: unknown) => process.stderr.write(`CLAUDE_STREAM_LOG: ${String(error)}\n`));
 }
 
 function looks(text: string, markers: readonly string[]): boolean {
@@ -89,6 +94,28 @@ export function extractClaudeResult(stdout: string, journal?: ToolCall[]): strin
   return typeof json['result'] === 'string' ? json['result'] : stdout;
 }
 
+/**
+ * Правило Bash, которое claude иначе выясняет отказами: `Bash(git diff *)` пропускает только
+ * одиночную команду. Строку вида `cd …; D=…; git diff $D` dontAsk отклоняет целиком, после
+ * первого отказа агент решает, что Bash запрещён, и ревьюит новые версии файлов через Read,
+ * не видя самого изменения.
+ */
+export function claudeBashRules(allowedTools: readonly string[]): string {
+  const commands = allowedTools
+    .map((tool) => /^Bash\((.+?) \*\)$/.exec(tool)?.[1])
+    .filter((command): command is string => command !== undefined);
+  if (commands.length === 0) return '';
+  return [
+    '',
+    'ОГРАНИЧЕНИЯ BASH В ЭТОМ ЗАПУСКЕ:',
+    `- Разрешены только команды, начинающиеся с: ${commands.map((c) => `\`${c}\``).join(', ')}.`,
+    '- Одна команда на вызов Bash: без `cd`, без переменных (`D=…`), без `;`, `&&`, `|`, `>` и подстановок `$(…)`.',
+    '  Составную строку песочница отклоняет целиком. Отказ означает неверную форму команды, а не запрет Bash:',
+    '  повтори её одиночной командой с SHA и путями, подставленными явно.',
+    '- Текущая директория уже корень репозитория, `cd` не нужен. Файлы читай через Read, не через `cat` или `head`.',
+  ].join('\n');
+}
+
 /** `mcp.json` для `--mcp-config` в каталоге джобы (его сносит processor); внутри токены коннекторов. */
 async function writeMcpConfig(jobDir: string, connectors: readonly NamedConnector[]): Promise<string> {
   const path = join(jobDir, 'mcp.json');
@@ -111,6 +138,7 @@ export function createClaudeAgent(config: AppConfig): Agent {
   return {
     name: 'claude',
     run: async (prompt, { cwd, jobDir, readDirs, access, journal, model }) => {
+      const allowedTools = claudeAllowedTools(config.claudeAllowedTools, access ?? NO_ACCESS);
       const args = [
         '--print',
         '--output-format',
@@ -120,7 +148,7 @@ export function createClaudeAgent(config: AppConfig): Agent {
         '--permission-mode',
         config.claudePermissionMode,
         '--allowedTools',
-        claudeAllowedTools(config.claudeAllowedTools, access ?? NO_ACCESS).join(','),
+        allowedTools.join(','),
       ];
       const claudeModel = model?.model ?? config.claudeModel;
       if (claudeModel) args.push('--model', claudeModel);
@@ -135,7 +163,7 @@ export function createClaudeAgent(config: AppConfig): Agent {
           timeout: config.claudeTimeoutMs,
           // Промпт через stdin (подтверждено: `claude -p` читает stdin как промпт).
           // execa пишет `input` и закрывает stdin (EOF) → claude не виснет и нет E2BIG.
-          input: prompt,
+          input: `${prompt}\n${claudeBashRules(allowedTools)}`,
           // Явный allowlist вместо `...process.env`: токены ботов и коннекторов в окружение
           // claude не попадают — коннекторы получают свои через mcp.json.
           env: agentEnv(process.env, { ...cliToolsEnv(access), CLAUDE_CODE_OAUTH_TOKEN: config.claudeOauthToken }),
